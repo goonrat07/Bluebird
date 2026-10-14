@@ -9,6 +9,9 @@ import { EventSession } from './eventSession';
 import { EVENTS, placeRider, type EventId } from './sim/events';
 import { TuningPanel } from './ui/tuningPanel';
 import { type Vec3, add, scale, sub } from './sim/vec';
+import { type LiftRide, boardLift, liftToBoard, stepLift, unloadRider } from './sim/lifts';
+import { TrailMap } from './ui/trailMap';
+import { heightAt } from './sim/terrain';
 
 export interface Telemetry {
   frame: number;
@@ -35,6 +38,10 @@ export interface Telemetry {
   sound: string;
   /** Loudness of the sound output right now (RMS). */
   soundLevel: number;
+  /** The chairlift being ridden, and how far up it (0..1). */
+  lift: { name: string; progress: number } | null;
+  /** The lift you could get on right now with E. */
+  canBoard: string | null;
   /** The event being ridden, if any. */
   event: {
     id: EventId;
@@ -69,6 +76,8 @@ export class Game {
   private heardBranches = 0;
   private event: EventSession | null = null;
   private ghostPrev: Vec3 | null = null;
+  private chair: LiftRide | null = null;
+  private readonly map = new TrailMap();
 
   constructor(private readonly view: SceneView) {
     this.keyboard.onCommand((c) => this.command(c));
@@ -83,7 +92,19 @@ export class Game {
 
   command(c: Command): void {
     // Events replay from their inputs alone, so mid-run only a fresh start or leaving is allowed.
+    if (c === 'toggleMap') return this.map.toggle();
+    // Lifts are for getting around between rides, so not during an event.
+    if (c === 'lift') {
+      if (this.event?.active || this.chair) return;
+      const lift = liftToBoard(this.rider.pos, speedOf(this.rider));
+      if (lift) this.chair = boardLift(lift);
+      return;
+    }
+    if (c === 'slopestyle' || c === 'treeRun') this.chair = null;
     if (c === 'slopestyle' || c === 'treeRun') return this.startEvent(c);
+    // Nothing but leaving (back to the top) while sitting on a chair.
+    if (this.chair && c !== 'restart' && c !== 'toggleTuning' && c !== 'cycleLight' && c !== 'toggleMute' && c !== 'swapSport') return;
+    if (c === 'restart') this.chair = null;
     if (this.event?.active && c === 'reset') return this.startEvent(this.event.def.id);
     if (this.event?.active && c === 'swapSport') return;
     if (c === 'reset' || c === 'restart' || c === 'swapSport') this.event = null;
@@ -114,7 +135,25 @@ export class Game {
     const r = createRider(this.rider.sport, this.rider.assist);
     placeRider(r, z, u, speed, run);
     this.event = null;
+    this.chair = null;
     this.useRider(r);
+  }
+
+  /** Debug: puts the rider at (x, z), standing still and facing downhill. */
+  placeAt(x: number, z: number): void {
+    const r = createRider(this.rider.sport, this.rider.assist);
+    r.pos = { x, y: heightAt(x, z), z };
+    r.safeSpots = [{ pos: { ...r.pos }, heading: 0 }];
+    this.event = null;
+    this.chair = null;
+    this.useRider(r);
+  }
+
+  /** Debug: moves the current lift ride to fraction f of the way up. */
+  liftProgress(f: number): void {
+    if (!this.chair) return;
+    this.chair.s = Math.min(1, Math.max(0, f)) * this.chair.lift.length;
+    this.snapCamera = true;
   }
 
   private useRider(r: RiderState): void {
@@ -155,6 +194,8 @@ export class Game {
       balance: r.rail?.balance ?? 0,
       sound: this.sound.state,
       soundLevel: this.sound.level(),
+      lift: this.chair && { name: this.chair.lift.name, progress: this.chair.s / this.chair.lift.length },
+      canBoard: this.boardable(),
       event: this.event && {
         id: this.event.def.id,
         phase: this.event.run.phase,
@@ -166,6 +207,11 @@ export class Game {
         ghostZ: this.event.ghost?.rider.pos.z ?? null,
       },
     };
+  }
+
+  private boardable(): string | null {
+    if (this.chair || this.event?.active) return null;
+    return liftToBoard(this.rider.pos, speedOf(this.rider))?.name ?? null;
   }
 
   private renderGhost(alpha: number, dt: number): void {
@@ -229,7 +275,12 @@ export class Game {
       const wasOnRail = this.rider.rail !== null;
       const popping = this.rider.jumpHeld && !input.jump;
       if (this.event?.ghost) this.ghostPrev = { ...this.event.ghost.rider.pos };
-      if (this.event) this.event.step(input, STEP);
+      if (this.chair) {
+        if (stepLift(this.chair, this.rider, input.up, STEP)) {
+          unloadRider(this.rider, this.chair.lift);
+          this.chair = null;
+        }
+      } else if (this.event) this.event.step(input, STEP);
       else stepRider(this.rider, input, STEP);
       if (!before && this.rider.grounded) landed = true;
       this.listen(before, wasOnRail, popping);
@@ -258,7 +309,8 @@ export class Game {
         crashed: r.crashed,
         crashTimer: r.crashTimer,
         charge: r.charge,
-        tucking: r.tucking,
+        // Sitting on a chair reads best as the crouched tuck.
+        tucking: r.tucking || this.chair !== null,
         braking: r.braking,
         skidding: r.skidding,
         grab: r.grab,
@@ -267,6 +319,7 @@ export class Game {
         deepSnow: r.snow === 'powder',
         flow: r.flow,
         grinding: r.rail !== null,
+        chair: this.chair ? this.chair.lift.heading : null,
       },
       dt,
       this.snapCamera,
@@ -276,6 +329,8 @@ export class Game {
     this.hud.updateFlow(dt, r.flow, r.branchHits);
     this.hud.updateBalance(dt, r.rail?.balance ?? null);
     this.hud.updateEvent(this.event);
+    this.hud.updateLift(this.chair && { name: this.chair.lift.name, progress: this.chair.s / this.chair.lift.length }, this.boardable());
+    this.map.update(r.pos, r.heading, this.chair?.lift.id ?? null);
     this.renderGhost(alpha, dt);
     this.sound.update({
       speed: speedOf(r),

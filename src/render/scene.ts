@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { RUN, centerX, heightAt, inGlade } from '../sim/terrain';
 import { buildMountain } from './mountain';
+import { LIFT } from '../sim/lifts';
+import { LiftsView, chairGeometry, chairMaterial } from './lifts';
 import { TREES, type Tree, treeBaseY } from '../sim/trees';
 import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
@@ -17,6 +19,8 @@ export interface FrameView extends RiderPose {
   pos: Vec3;
   vel: Vec3;
   skidding: boolean;
+  /** Heading of the chairlift the rider is sitting on, or null. */
+  chair: number | null;
   /** True on the frame the rider touched down. */
   justLanded: boolean;
   /** Riding through powder, where tracks are deeper. */
@@ -52,6 +56,9 @@ export class SceneView {
   private readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2000);
   private readonly rider = new RiderModel();
   private readonly ghost = new RiderModel();
+  private readonly lifts = new LiftsView();
+  /** The chair under the player while they ride a lift. */
+  private readonly seat = new THREE.Mesh(chairGeometry(), chairMaterial());
   private readonly spray = new Spray();
   private readonly sun = new THREE.DirectionalLight(0xffffff, 3);
   private readonly hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
@@ -88,7 +95,7 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.lifts.root, this.seat, this.rider.root, this.ghost.root, this.spray.points);
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
@@ -150,6 +157,13 @@ export class SceneView {
   private readonly forest = buildTrees();
 
   render(v: FrameView, dt: number, snap = false): void {
+    this.lifts.update(dt);
+    // Seated on a chair: its seat is just under the rider, its grip a hang above that.
+    this.seat.visible = v.chair !== null;
+    if (v.chair !== null) {
+      this.seat.position.set(v.pos.x, v.pos.y + LIFT.hang - 0.1, v.pos.z);
+      this.seat.rotation.y = v.chair;
+    }
     this.rider.root.position.set(v.pos.x, v.pos.y, v.pos.z);
     this.rider.update(v, dt);
     this.emitSpray(v);
@@ -182,7 +196,8 @@ export class SceneView {
   private updateCamera(v: FrameView, dt: number, snap: boolean): void {
     // Follow the direction of travel, not the way the rider faces, so spins don't whip the camera around.
     const hSpeed = Math.hypot(v.vel.x, v.vel.z);
-    const travelYaw = hSpeed > 1.5 ? Math.atan2(v.vel.x, v.vel.z) : this.camYaw;
+    // On a chair, look up the line with the rider.
+    const travelYaw = v.chair !== null ? v.chair : hSpeed > 1.5 ? Math.atan2(v.vel.x, v.vel.z) : this.camYaw;
     const k = snap ? 1 : 1 - Math.exp(-4 * dt);
     this.camYaw = snap ? v.heading : lerpAngle(this.camYaw, travelYaw, k);
 

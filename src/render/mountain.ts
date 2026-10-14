@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MOUNTAIN_BOUNDS, RUNS, type RunInfo, heightAt, isNearLip, onKicker, snowAt } from '../sim/terrain';
+import { CAT_TRACKS, type CatTrack, MOUNTAIN_BOUNDS, RUNS, type RunInfo, heightAt, isNearLip, onKicker, snowAt } from '../sim/terrain';
 import type { SnowType } from '../sim/tuning';
 
 // Kettle Peak's snow, built in chunks so the parts behind the camera are culled.
@@ -116,6 +116,32 @@ function ribbon(run: RunInfo, material: THREE.Material): THREE.Mesh[] {
   return meshes;
 }
 
+/** A cat track's ribbon: a fine grid along the road, wide enough to take in its cut and fill. */
+function road(track: CatTrack, material: THREE.Material): THREE.Mesh {
+  const W = track.halfWidth + 10;
+  const total = track.along[track.along.length - 1];
+  const rows = Math.ceil(total / GRID.along);
+  const cols = Math.ceil((2 * W) / 1);
+  // Position and sideways direction at distance s along the road; corners are mitred by averaging.
+  const frame = (s: number): [number, number, number, number] => {
+    let i = 1;
+    while (i < track.along.length - 1 && track.along[i] < s) i++;
+    const [x0, z0] = track.points[i - 1];
+    const [x1, z1] = track.points[i];
+    const f = (s - track.along[i - 1]) / (track.along[i] - track.along[i - 1]);
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    return [x0 + (x1 - x0) * f, z0 + (z1 - z0) * f, -(z1 - z0) / len, (x1 - x0) / len];
+  };
+  return new THREE.Mesh(
+    grid(rows, cols, (r, k) => {
+      const [x, z, nx, nz] = frame((total * r) / rows);
+      const u = -W + (2 * W * k) / cols;
+      return [x + nx * u, z + nz * u];
+    }),
+    material,
+  );
+}
+
 /** The forest and rock between the runs, as square chunks. */
 function world(material: THREE.Material): THREE.Mesh[] {
   const B = MOUNTAIN_BOUNDS;
@@ -144,7 +170,7 @@ function apron(material: THREE.Material): THREE.Mesh {
 
 export function buildMountain(material: THREE.Material): THREE.Group {
   const g = new THREE.Group();
-  for (const m of [...RUNS.flatMap((r) => ribbon(r, material)), ...world(material), apron(material)]) {
+  for (const m of [...RUNS.flatMap((r) => ribbon(r, material)), ...CAT_TRACKS.map((t) => road(t, material)), ...world(material), apron(material)]) {
     m.receiveShadow = true;
     g.add(m);
   }
