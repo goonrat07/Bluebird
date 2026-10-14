@@ -306,6 +306,40 @@ test('time of day and weather', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('riding feel: carving, skid turns and the camera at speed', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  await load(page, errors);
+  const frames = async (n: number) => {
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction(([f, n]) => window.__game!.telemetry().frame > f + n, [f, n]);
+  };
+  for (const sport of ['board', 'ski']) {
+    if ((await telemetry(page)).sport !== sport) {
+      await page.keyboard.press('KeyF');
+      await page.waitForFunction((s) => window.__game!.telemetry().sport === s, sport);
+    }
+    // A full carve at speed: the body leans into it and the horizon tips a little.
+    await page.evaluate(() => window.__game!.teleport(180, 6, 17));
+    await frames(2);
+    await page.keyboard.down('KeyD');
+    await page.waitForFunction(() => window.__game!.telemetry().edge < -0.95);
+    await frames(6);
+    await page.screenshot({ path: `test/artifacts/feel-carve-${sport}.png` });
+    await page.keyboard.up('KeyD');
+    // S + A: a braking pivot that throws the equipment sideways and scrubs speed.
+    await page.evaluate(() => window.__game!.teleport(180, 0, 14));
+    await frames(2);
+    await page.keyboard.down('KeyS');
+    await page.keyboard.down('KeyA');
+    await frames(8);
+    await page.screenshot({ path: `test/artifacts/feel-skid-${sport}.png` });
+    await page.keyboard.up('KeyA');
+    await page.keyboard.up('KeyS');
+  }
+  expect(errors).toEqual([]);
+});
+
 test('riding the glade builds Flow', async ({ page }) => {
   test.setTimeout(180_000); // the glade is the heaviest view for a software renderer
   const errors: string[] = [];
@@ -337,7 +371,7 @@ test('riding onto the park box grinds it', async ({ page }) => {
 });
 
 test('events: countdown, a ghost to chase, and a result', async ({ page }) => {
-  test.setTimeout(420_000); // two events, ridden in software GL
+  test.setTimeout(600_000); // two events, ridden in software GL
   const errors: string[] = [];
   await load(page, errors);
   await page.keyboard.press('Digit1');
@@ -352,7 +386,8 @@ test('events: countdown, a ghost to chase, and a result', async ({ page }) => {
   // The glade dash ridden hands-off drifts out of the trees, which ends the run with a result card.
   await page.keyboard.press('Digit2');
   await page.waitForFunction(() => window.__game!.telemetry().event?.id === 'treeRun');
-  await page.waitForFunction(() => window.__game!.telemetry().event?.phase === 'done', null, { timeout: 180_000 });
+  // Hands-off it leaves the glade after about 12 s of riding; software GL runs well behind real time.
+  await page.waitForFunction(() => window.__game!.telemetry().event?.phase === 'done', null, { timeout: 360_000 });
   const done = await telemetry(page);
   console.log(`glade dash: ${JSON.stringify(done.event!.result)}`);
   await page.waitForTimeout(400);

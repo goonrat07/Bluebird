@@ -50,6 +50,10 @@ export interface RiderState {
   /** Counts down after passing a kicker lip; a pop released while positive gets the lip bonus. */
   lipTimer: number;
   skateTimer: number;
+  /** Sideways g of the last ground step's turn (positive turning left); 0 in the air. For animation. */
+  turnG: number;
+  /** Edge-to-edge in progress toward this side (+1 left, -1 right), or 0. */
+  edgeFlip: number;
   /** Pushing along with poles (skis) or a back foot (board) this step. */
   pushing: boolean;
 
@@ -104,6 +108,8 @@ export function createRider(sport: Sport = 'board', assist: AssistLevel = 'norma
     lipTimer: 0,
     skateTimer: 0,
     pushing: false,
+    edgeFlip: 0,
+    turnG: 0,
     pitch: 0,
     spinVel: 0,
     flipVel: 0,
@@ -151,8 +157,17 @@ export function stepRider(r: RiderState, input: RideInput, dt: number): void {
     return;
   }
   if (r.crashed) stepCrashed(r, dt);
-  else if (r.grounded) stepGround(r, input, dt);
-  else stepAir(r, input, dt);
+  else if (r.grounded) {
+    const before = Math.atan2(r.vel.x, r.vel.z);
+    stepGround(r, input, dt);
+    // Sideways g of the turn just made, for the body to lean into (positive turning left).
+    const hs = Math.hypot(r.vel.x, r.vel.z);
+    r.turnG = hs > 1 ? (wrapAngle(Math.atan2(r.vel.x, r.vel.z) - before) / dt) * hs / WORLD.gravity : 0;
+  }
+  else {
+    r.turnG = 0;
+    stepAir(r, input, dt);
+  }
 
   r.vel = add(r.vel, vec(0, -WORLD.gravity * dt, 0));
   const prevY = r.pos.y;
@@ -170,21 +185,33 @@ function stepGround(r: RiderState, input: RideInput, dt: number): void {
   const snow = SNOW[r.snow];
   const speed = length(r.vel);
 
-  // Edge builds up while a key is held and flattens when released: holding longer turns harder.
+  // Edge builds up while a key is held (a tap is a small correction, a hold a full carve), flattens quickly
+  // when released, and snaps straight across when you press the other way.
   const target = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-  const rampTime = target !== 0 && Math.sign(target) === Math.sign(r.edge || target) ? sport.edgeRampTime : sport.edgeReleaseTime;
-  r.edge = approach(r.edge, target, dt / rampTime);
+  // A flip starts when the other key goes down while on an edge, and runs until the new edge is fully set.
+  if (target !== 0 && r.edge !== 0 && Math.sign(target) !== Math.sign(r.edge)) r.edgeFlip = target;
+  if (r.edgeFlip !== target || Math.abs(r.edge) >= 1) r.edgeFlip = 0;
+  const rate = r.edgeFlip !== 0 ? 2 / sport.edgeFlipTime : target !== 0 ? 1 / sport.edgeRampTime : 1 / sport.edgeReleaseTime;
+  r.edge = approach(r.edge, target, rate * dt);
 
-  // Carved turn radius shrinks with edge angle; at low speed the rider can pivot instead.
-  const edgeRad = (Math.abs(r.edge) * sport.maxEdgeDeg * Math.PI) / 180;
-  const carveRate = (speed * Math.sin(edgeRad)) / sport.sidecutRadius;
-  const pivot = sport.pivotRate * Math.abs(r.edge) * Math.max(0, 1 - speed / 8);
+  // Full lock swings you round at a steady rate when slow and is limited by sideways g when fast,
+  // so there's no dead zone between a pivot and a carve, and a held carve never asks more than the edge can grip.
+  const lock = Math.min(sport.turnRateLow, (sport.turnAccel * WORLD.gravity * snow.turn) / Math.max(speed, 0.1));
   // W pushes along when slow (flats, deep powder) and tucks once you're moving.
   r.pushing = input.up && !input.down && speed < sport.pushMaxSpeed;
   r.tucking = input.up && !r.pushing;
-  let turnRate = Math.min(sport.maxTurnRate, Math.max(carveRate, pivot));
+  let turnRate = lock * Math.abs(r.edge);
   if (r.tucking) turnRate *= 0.6;
-  r.heading = wrapAngle(r.heading + Math.sign(r.edge) * turnRate * dt);
+  // S + A/D: throw the equipment sideways in a braking pivot. Speed goes into the snow, not the turn.
+  // It swings round to about sideways and holds there, like a hockey stop, rather than spinning you in circles.
+  const travelYaw = Math.atan2(r.vel.x, r.vel.z);
+  const across = wrapAngle(r.heading - travelYaw) * Math.sign(r.edge);
+  if (input.down && target !== 0 && speed > 1 && across >= RIDE.skidHoldAngle) {
+    r.heading = wrapAngle(travelYaw + Math.sign(r.edge) * RIDE.skidHoldAngle);
+  } else {
+    if (input.down && target !== 0 && speed > 1) turnRate = Math.max(turnRate, sport.skidTurnRate * Math.abs(r.edge));
+    r.heading = wrapAngle(r.heading + Math.sign(r.edge) * turnRate * dt);
+  }
 
   // Split velocity into along-the-equipment and sideways (riding switch counts as along).
   const facing = normalize(projectOnPlane(facingOf(r.heading), n));
@@ -196,10 +223,12 @@ function stepGround(r: RiderState, input: RideInput, dt: number): void {
 
   // Edges grip up to a limit; within it sideways motion is carved into forward motion
   // (keeping speed), past it the rider skids and scrubs speed.
-  const gripLimit = snow.grip * WORLD.gravity * n.y * (0.35 + 0.65 * Math.abs(r.edge));
+  const gripLimit = snow.grip * WORLD.gravity * n.y * (0.35 + 0.65 * Math.abs(r.edge)) * (input.down ? RIDE.skidGrip : 1);
   const removed = Math.min(latMag, gripLimit * dt);
   const latLeft = latMag - removed;
-  const newAlong = Math.sqrt(alongMag * alongMag + (latMag * latMag - latLeft * latLeft) * sport.carveEfficiency);
+  // Carving turns sideways motion into forward motion; braking just scrubs it off into the snow.
+  const keep = input.down ? RIDE.skidKeep : sport.carveEfficiency;
+  const newAlong = Math.sqrt(alongMag * alongMag + (latMag * latMag - latLeft * latLeft) * keep);
   const normalPart = scale(n, dot(r.vel, n));
   const newLat = latMag > 1e-9 ? scale(lateral, latLeft / latMag) : vec();
   r.vel = add(add(scale(travel, newAlong), newLat), normalPart);

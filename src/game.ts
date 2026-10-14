@@ -473,6 +473,7 @@ export class Game {
         charge: r.charge,
         // Sitting on a chair reads best as the crouched tuck.
         tucking: r.tucking || this.chair !== null,
+        turnG: r.turnG,
         push: r.pushing && r.grounded ? 1 - Math.max(0, r.skateTimer) / SPORTS[r.sport].pushInterval : null,
         braking: r.braking,
         skidding: r.skidding,
