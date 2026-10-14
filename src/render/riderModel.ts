@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import type { Sport } from '../sim/tuning';
 import { SPORTS } from '../sim/tuning';
-import { PALETTE, addOutlines, capsule, hanging, rounded, toon, toonOwn } from './toon';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { PALETTE } from './toon';
+import { painted, riderAsset } from './characterAssets';
 
 /** What the renderer needs to pose the rider for one frame. */
 export interface RiderPose {
@@ -58,29 +60,62 @@ const part = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 
   m.castShadow = true;
   return m;
 };
-const box = (w: number, h: number, d: number, color: number): THREE.Mesh => part(new THREE.BoxGeometry(w, h, d), toon(color));
+const box = (w: number, h: number, d: number, color: number): THREE.Mesh => part(new THREE.BoxGeometry(w, h, d), painted(color));
 
-// A storybook rider in the Tiny Bookshop manner: slim and naturally proportioned, flat colour, ink outline. Nested groups do the posing:
-// yaw (heading) -> flip (pitch) -> lean (edge) -> stance (sideways for a board) -> body parts.
+/** How far the arms hang out from the body in the model's rest pose (rad); arm angles are measured from straight down. */
+const REST_ARM_OUT = 0.15;
+/** Leg length hip to ankle (m), and how much a full crouch lowers the hips. */
+const LEG = { length: 0.83, drop: 0.36 };
+
+/** The joints the pose code drives, before they're written to the skeleton. Index 0 is the right side, 1 the left. */
+interface Joints {
+  /** Leg swing forward/back (rad, positive swings the foot back) and out to the side. */
+  legX: [number, number];
+  legZ: [number, number];
+  /** Arm swing (positive back) and how far each arm is raised out to its side. */
+  armX: [number, number];
+  armOut: [number, number];
+  /** Elbow bend (rad, forward). */
+  elbow: number;
+  /** Upper body turn. */
+  torsoYaw: number;
+  /** 0 = standing tall, 1 = deep crouch. */
+  crouch: number;
+}
+
+/** A bone with what's needed to turn it about axes fixed in the model's rest pose. */
+interface Joint {
+  bone: THREE.Bone;
+  rest: THREE.Quaternion;
+  /** The parent's rest orientation in model space, and its inverse. */
+  frame: THREE.Quaternion;
+  unframe: THREE.Quaternion;
+}
+
+const tmpQ = new THREE.Quaternion();
+const tmpE = new THREE.Euler();
+
+// The rider modelled in Blender (tools/blender/characters.py) after the Tiny Bookshop look: natural
+// proportions, softly painted, posed bone by bone. Nested groups do the big moves:
+// yaw (heading) -> flip (pitch) -> lean (edge) -> stance (sideways for a board) -> the rigged body.
 export class RiderModel {
   readonly root = new THREE.Group();
   private readonly flip = new THREE.Group();
   private readonly lean = new THREE.Group();
   private readonly stance = new THREE.Group();
-  private readonly hips = new THREE.Group();
-  private readonly torso = new THREE.Group();
-  private readonly armLeft = new THREE.Group();
-  private readonly armRight = new THREE.Group();
-  private readonly legs: THREE.Mesh[] = [];
+  private readonly model: THREE.Object3D;
+  private readonly joints = new Map<string, Joint>();
+  private readonly hipsRest: THREE.Vector3;
+  private readonly j: Joints = { legX: [0, 0], legZ: [0, 0], armX: [0, 0], armOut: [0.35, 0.35], elbow: 0.3, torsoYaw: 0, crouch: 0.15 };
   private readonly board = box(0.3, 0.05, 1.55, PALETTE.plum);
   private readonly skis = new THREE.Group();
-  /** Ski poles, one in each hand. */
+  /** Ski poles, one in each hand (right, left). */
   private readonly poles: THREE.Mesh[] = [];
   /** Gear over the shoulder while walking. */
   private readonly carried = new THREE.Group();
   private readonly carriedBoard = box(0.3, 1.55, 0.05, PALETTE.plum);
   private readonly carriedSkis = new THREE.Group();
-  private readonly jacketMat: THREE.MeshToonMaterial;
+  private readonly jacketMat: THREE.MeshLambertMaterial;
   private walking = false;
   private sport: Sport | null = null;
   private leanNow = 0;
@@ -93,79 +128,117 @@ export class RiderModel {
   private wasGrounded = true;
 
   constructor() {
-    const jacket = PALETTE.terracotta;
-
     // Flip around the rider's middle, not their feet.
     this.flip.position.y = 0.9;
     this.lean.position.y = -0.9;
     this.root.add(this.flip);
     this.flip.add(this.lean);
     this.lean.add(this.stance);
-    this.stance.add(this.hips);
 
-    // Legs are centred capsules 0.8 m long, so the crouch can squash them about their middle.
-    const legGeo = capsule(0.075, 0.8).translate(0, -0.4, 0);
-    for (const side of [-1, 1]) {
-      const leg = part(legGeo, toon(PALETTE.denim), side * 0.1, 0.4, 0);
-      this.legs.push(leg);
-      this.hips.add(leg);
-      this.hips.add(part(rounded(0.13, 0.12, 0.27), toon(PALETTE.ink), side * 0.1, 0.06, 0.03));
-    }
-    this.torso.position.y = 0.8;
-    this.hips.add(this.torso);
-    // A slim, natural figure about seven heads tall: a long jacket over the hips, a scarf, a small head
-    // with hair showing under the helmet and goggles pushed up. No face details; colour and shape carry it.
-    this.jacketMat = toonOwn(jacket);
-    const chest = part(capsule(0.17, 0.64, 12).scale(1, 1, 0.72), this.jacketMat, 0, -0.1, 0);
-    const scarf = part(new THREE.TorusGeometry(0.075, 0.035, 6, 14).rotateX(Math.PI / 2), toon(PALETTE.mustard), 0, 0.53, 0.005);
-    const neck = part(capsule(0.045, 0.12), toon(PALETTE.skinLight), 0, 0.52, 0);
-    const head = part(new THREE.SphereGeometry(0.11, 16, 12).scale(0.95, 1.08, 1), toon(PALETTE.skinLight), 0, 0.69, 0.005);
-    const hair = part(new THREE.SphereGeometry(0.1, 12, 8).scale(1.2, 0.85, 0.75), toon(PALETTE.hairBrown), 0, 0.655, -0.055);
-    const helmet = part(new THREE.SphereGeometry(0.125, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), toon(PALETTE.pine), 0, 0.705, -0.005);
-    const goggles = part(rounded(0.17, 0.055, 0.05), toon(PALETTE.ink), 0, 0.79, 0.075);
-    goggles.rotation.x = -0.6;
-    const lens = part(rounded(0.14, 0.036, 0.014), toon(0x8fc3c8), 0, 0.792, 0.097);
-    lens.rotation.x = -0.6;
-    lens.userData.noOutline = true;
-    this.torso.add(chest, scarf, neck, head, hair, helmet, goggles, lens);
-    for (const [arm, side] of [[this.armLeft, 1], [this.armRight, -1]] as const) {
-      arm.position.set(side * 0.2, 0.46, 0);
-      const sleeve = part(hanging(0.055, 0.5), this.jacketMat);
-      arm.add(sleeve);
-      arm.add(part(new THREE.SphereGeometry(0.05, 10, 8), toon(PALETTE.mustard), 0, -0.52, 0));
-      // A pole in the hand, basket end trailing down and back.
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1.2, 5), toon(PALETTE.ink));
+    this.model = cloneSkinned(riderAsset().scene);
+    this.model.position.y = 0.05; // boots on top of the board
+    this.model.updateMatrixWorld(true);
+    // This rider's own jacket, so the outfitters can recolour it.
+    let jacket: THREE.MeshLambertMaterial | null = null;
+    this.model.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.castShadow = true;
+        o.frustumCulled = false; // the posed body leaves its rest bounds
+        if ((o.material as THREE.Material).name === 'jacket') o.material = jacket ??= (o.material as THREE.MeshLambertMaterial).clone();
+      }
+      if (o instanceof THREE.Bone) {
+        const frame = new THREE.Quaternion();
+        o.parent?.getWorldQuaternion(frame);
+        this.joints.set(o.name, { bone: o, rest: o.quaternion.clone(), frame, unframe: frame.clone().invert() });
+      }
+    });
+    this.jacketMat = jacket ?? painted(PALETTE.terracotta);
+    this.hipsRest = this.bone('hips').position.clone();
+    this.stance.add(this.model);
+
+    for (const side of ['R', 'L']) {
+      // A pole in each hand; its direction is set every frame (see placePoles).
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.15, 5).translate(0, -0.575, 0), painted(PALETTE.ink));
       pole.castShadow = true;
-      pole.userData.noOutline = true;
-      pole.geometry.translate(0, -0.6, 0);
-      pole.position.set(0, -0.54, 0.03);
-      pole.rotation.x = 0.45;
-      arm.add(pole);
+      pole.position.y = 0.05;
+      this.bone(`hand${side}`).add(pole);
       this.poles.push(pole);
-      this.torso.add(arm);
     }
 
     this.board.position.y = 0.03;
     for (const side of [-1, 1]) {
       const ski = box(0.1, 0.04, 1.75, PALETTE.plum);
-      ski.position.set(side * 0.16, 0.02, 0.1);
+      ski.position.set(side * 0.12, 0.02, 0.1);
       this.skis.add(ski);
     }
     this.lean.add(this.board, this.skis);
 
-    // Board slung on the back; skis together over the right shoulder.
-    this.carriedBoard.position.set(0, 0.3, -0.15);
+    // Board slung on the back; skis together over the right shoulder. Laid out in model space, then
+    // hung on the chest bone so they move with the body.
+    this.carriedBoard.position.set(0, 0.3, -0.2);
     this.carriedBoard.rotation.z = 0.5;
     for (const side of [-1, 1]) {
       const ski = box(0.08, 0.04, 1.75, PALETTE.plum);
-      ski.position.set(-0.2 + side * 0.05, 0.6, 0.03);
+      ski.position.set(-0.24 + side * 0.05, 0.5, 0.04);
       ski.rotation.x = -0.35;
       this.carriedSkis.add(ski);
     }
     this.carried.add(this.carriedBoard, this.carriedSkis);
     this.carried.visible = false;
-    this.torso.add(this.carried);
-    addOutlines(this.root);
+    const chest = this.bone('chest');
+    const chestQ = new THREE.Quaternion();
+    chest.getWorldQuaternion(chestQ);
+    this.carried.quaternion.copy(chestQ.invert());
+    this.carried.position.copy(chest.worldToLocal(new THREE.Vector3(0, 1.0, 0)));
+    chest.add(this.carried);
+  }
+
+  private bone(name: string): THREE.Bone {
+    const j = this.joints.get(name);
+    if (!j) throw new Error(`rider has no bone ${name}`);
+    return j.bone;
+  }
+
+  /** Turns a bone by Euler angles about the model's rest-pose axes (x across, y up, z forward). */
+  private turn(name: string, x: number, y = 0, z = 0): void {
+    const j = this.joints.get(name)!;
+    tmpQ.setFromEuler(tmpE.set(x, y, z, 'YXZ'));
+    j.bone.quaternion.copy(j.unframe).multiply(tmpQ).multiply(j.frame).multiply(j.rest);
+  }
+
+  /** Writes the joint state to the skeleton. */
+  private applyPose(): void {
+    const { j } = this;
+    const drop = LEG.drop * j.crouch;
+    const a = Math.acos(Math.max(0.2, 1 - drop / LEG.length));
+    this.bone('hips').position.set(this.hipsRest.x, this.hipsRest.y - drop, this.hipsRest.z);
+    (['R', 'L'] as const).forEach((side, i) => {
+      // Thigh forward, shin back twice as far, foot level again: the feet stay under the hips.
+      this.turn(`thigh${side}`, -a + j.legX[i], 0, j.legZ[i]);
+      this.turn(`shin${side}`, 2 * a + Math.max(0, j.legX[i]) * 0.9);
+      this.turn(`foot${side}`, -a);
+      const out = j.armOut[i] - REST_ARM_OUT;
+      this.turn(`upperarm${side}`, j.armX[i], 0, side === 'L' ? out : -out);
+      this.turn(`forearm${side}`, -j.elbow);
+    });
+    // Lean the chest over the knees as you crouch; the head stays looking ahead.
+    this.turn('spine', j.crouch * 0.45, j.torsoYaw);
+    this.turn('chest', j.crouch * 0.15);
+    this.turn('head', -j.crouch * 0.45);
+  }
+
+  /** Points each pole down and a little back from the hand, swinging with the arm. */
+  private placePoles(): void {
+    this.model.updateMatrixWorld(true);
+    const modelQ = new THREE.Quaternion();
+    this.stance.getWorldQuaternion(modelQ);
+    const handQ = new THREE.Quaternion();
+    this.poles.forEach((pole, i) => {
+      if (!pole.visible) return;
+      (pole.parent as THREE.Object3D).getWorldQuaternion(handQ);
+      const want = new THREE.Quaternion().setFromEuler(tmpE.set(0.45 + this.j.armX[i] * 0.7, 0, 0));
+      pole.quaternion.copy(handQ.invert().multiply(modelQ).multiply(want));
+    });
   }
 
   /** Jacket colour from the outfitters. */
@@ -218,19 +291,24 @@ export class RiderModel {
       this.carriedSkis.visible = p.sport === 'ski';
       this.flip.rotation.set(0, 0, 0);
       this.lean.rotation.z = this.leanNow = 0;
-      this.torso.rotation.y = 0;
-      this.setCrouch(0);
+      const { j } = this;
+      j.torsoYaw = 0;
+      j.crouch = 0;
+      j.elbow = 0.15;
       // Legs and arms swing in opposition with each step.
       const stride = Math.min(1, (p.walkSpeed ?? 0) / 1.5) * 0.55;
       const s = Math.sin(p.walk!) * stride;
-      this.legs[0].rotation.x = s;
-      this.legs[1].rotation.x = -s;
-      this.armLeft.rotation.set(-s * 0.8, 0, 0.12);
-      this.armRight.rotation.set(s * 0.8, 0, -0.12);
+      j.legX = [s, -s];
+      j.legZ = [0, 0];
+      j.armX = [s * 0.8, -s * 0.8];
+      j.armOut = [0.12, 0.12];
+      this.applyPose();
       return;
     }
-    for (const leg of this.legs) leg.rotation.x = leg.rotation.z = 0;
-    this.armLeft.rotation.x = this.armRight.rotation.x = 0;
+    this.j.legX = [0, 0];
+    this.j.legZ = [0, 0];
+    this.j.armX = [0, 0];
+    this.j.elbow = 0.35;
 
     if (p.crashed) {
       // Tumble while crashed: a loose spin that slows as the timer runs out.
@@ -240,6 +318,8 @@ export class RiderModel {
       this.setCrouch(0.5);
       this.setArms(1.2, 1.2);
       this.wasGrounded = p.grounded;
+      this.applyPose();
+      this.placePoles();
       return;
     }
 
@@ -266,7 +346,7 @@ export class RiderModel {
     const leadTarget = p.grounded ? dir * p.edge * BODY.leadYaw : 0;
     this.leadNow = follow(this.leadNow, leadTarget, BODY.lead, dt);
     // Loading a pop with a key held: the shoulders wind up against the spin that's coming.
-    this.torso.rotation.y = this.leadNow - (p.grounded ? dir * p.edge * 0.6 * p.charge : 0);
+    this.j.torsoYaw = this.leadNow - (p.grounded ? dir * p.edge * 0.6 * p.charge : 0);
 
     let crouch = p.grounded ? Math.max(p.charge * 0.6, p.tucking ? 0.55 : 0.15, p.braking ? 0.3 : 0) : 0.25;
     if (p.grab) crouch = 0.75;
@@ -284,6 +364,8 @@ export class RiderModel {
     this.armR = follow(this.armR, r, BODY.arms, dt);
     this.setArms(this.armL, this.armR);
     if (p.push !== null && p.push !== undefined && p.grounded) this.pushPose(p.sport, p.push);
+    this.applyPose();
+    this.placePoles();
   }
 
   /** Pushing along: a double-pole plant and drive on skis, a back-foot scoot on a board. */
@@ -293,28 +375,22 @@ export class RiderModel {
     if (sport === 'ski') {
       // Arms reach forward, plant, and drive back past the hips; the body crunches over them.
       const swing = -1.1 + 1.8 * drive;
-      this.armLeft.rotation.x = this.armRight.rotation.x = swing;
+      this.j.armX = [swing, swing];
       this.setCrouch(0.15 + 0.35 * Math.sin(Math.min(1, t / 0.35) * Math.PI));
     } else {
       // Back foot out of the binding, kicking back along the board; the front knee bends with it.
-      this.legs[0].rotation.z = -0.7 * Math.sin(t * Math.PI);
+      this.j.legZ[0] = -0.7 * Math.sin(t * Math.PI);
       this.setCrouch(0.2 + 0.15 * Math.sin(t * Math.PI));
     }
   }
 
   /** 0 = standing tall, 1 = deep crouch. */
   private setCrouch(c: number): void {
-    const legLen = 0.8 * (1 - 0.45 * c);
-    for (const leg of this.legs) {
-      leg.scale.y = 1 - 0.45 * c;
-      leg.position.y = legLen / 2;
-    }
-    this.torso.position.y = legLen;
-    this.torso.rotation.x = c * 0.6;
+    this.j.crouch = c;
   }
 
+  /** How far each arm is raised out to its side (rad from hanging straight down). */
   private setArms(left: number, right: number): void {
-    this.armLeft.rotation.z = left;
-    this.armRight.rotation.z = -right;
+    this.j.armOut = [right, left];
   }
 }

@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import { RiderModel, type RiderPose } from './render/riderModel';
 import { DogModel } from './render/dogs';
-import { HIPS, PERSON, villagerLook } from './render/crowd';
-import { PALETTE, addOutlines, toon } from './render/toon';
+import { villagerLook, villagerMeshes } from './render/crowd';
+import { loadCharacters } from './render/characterAssets';
+import { PALETTE } from './render/toon';
 import { golden } from './render/presets/golden';
 
 // A dev-only character sheet (npm run dev, then /characters.html): everyone front-on in golden-hour
 // light on a patch of snow, for judging the character style without a chase camera in the way.
 
+await loadCharacters();
 const canvas = document.getElementById('sheet') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
@@ -45,34 +47,17 @@ add(-2.6, 'board', null);
 add(-1.3, 'ski', null, PALETTE.denim);
 add(0, 'board', 0, PALETTE.mustard);
 
-// Villagers built from the same parts the instanced crowd uses, one of each hair and hat.
-const villager = (x: number, i: number) => {
-  const look = villagerLook(i);
-  const g = new THREE.Group();
-  const parts: [THREE.BufferGeometry, number, number][] = [
-    [PERSON.legsStand(), look.pants, 0],
-    [PERSON.shoesStand(), PALETTE.ink, 0],
-    [PERSON.torso(), look.jacket, HIPS.stand],
-    [PERSON.armsDown(), look.jacket, HIPS.stand],
-    [PERSON.head(), look.skin, HIPS.stand],
-    [PERSON.top(look.top), look.topColor, HIPS.stand],
-  ];
-  for (const [geo, color, y] of parts) {
-    const m = new THREE.Mesh(geo, toon(color));
-    m.position.y = y;
-    m.castShadow = true;
-    g.add(m);
-  }
-  addOutlines(g);
-  g.position.x = x;
-  scene.add(g);
-};
-[0, 1, 2, 3, 4].forEach((k) => villager(0.9 + k * 0.7, [3, 4, 0, 1, 2][k]));
+// Villagers from the same Blender pieces the instanced crowd uses, one of each hair and hat.
+[0, 1, 2, 3, 4, 5, 6].forEach((i, k) => {
+  const v = villagerMeshes(villagerLook(i), i === 5 ? 'sit' : 'stand');
+  v.position.x = 0.8 + k * 0.62;
+  scene.add(v);
+});
 
 const dogs = ['Bowie', 'Pepper'].map((name, i) => {
   const d = new DogModel(name);
   scene.add(d.root);
-  return { d, x: -3.6 + i * 8.3 };
+  return { d, x: -3.7 + i * 9 };
 });
 
 function frame(): void {

@@ -31,8 +31,12 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `src/render/presets/` – time-of-day light presets (T steps through the day, easing between them).
   `src/render/weather.ts` lays clear, flat light or snowstorm over any of them (Y), plus the falling snow;
   `src/render/lamps.ts` lights Kettle Run and the village after dark. Purely visual: the sim never sees the sky.
-- `src/render/toon.ts` – the character look (rounded shapes, toon shading, warm palette). Rider, villagers and dogs all use it.
-  With `npm run dev`, `/characters.html` shows all of them side by side in one light.
+- Characters are modelled in Blender by script: `tools/blender/characters.py` writes `src/assets/models/rider.glb`
+  (rigged; `riderModel.ts` poses it bone by bone) and `villager.glb` (posed bodies plus hair and hats, instanced by `crowd.ts`).
+  Rebuild with Blender's Python module (`pip install bpy`, then `python tools/blender/characters.py`). The look follows the
+  Tiny Bookshop references in the project files: natural proportions, plain faces, soft painted light (`painted()` in
+  `characterAssets.ts`). With `npm run dev`, `/characters.html` shows everyone side by side in one light.
+- `src/render/forest.ts` – the trees (tiered, snow painted on in vertex colour, ink outline up close); `peaks.ts` – the far peaks.
 - `src/sim/rails.ts` – park rails and boxes; grinding lives in `rider.ts`.
 - `src/sim/events.ts` – events (start, finish, scoring, medals); `src/sim/replay.ts` records rides as one input mask per step.
   Ghosts replay those inputs, so anything that changes a ride must go through `RideInput`, never a side command.

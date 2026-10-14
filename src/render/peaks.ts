@@ -18,10 +18,11 @@ export function buildPeaks(center: THREE.Vector3): THREE.Mesh {
   const inner = 900;
   const outer = 1700;
   const height = (a: number, r: number): number => {
+    // Whole-number frequencies only, so the ring meets itself without a step.
     const ridge =
-      Math.abs(Math.sin(a * 3.1 + 0.6)) * 260 +
-      Math.abs(Math.sin(a * 7.3 + 2.1)) * 120 +
-      Math.abs(Math.sin(a * 17.7)) * 50 +
+      Math.abs(Math.sin(a * 3 + 0.6)) * 260 +
+      Math.abs(Math.sin(a * 7 + 2.1)) * 120 +
+      Math.abs(Math.sin(a * 18)) * 50 +
       // Crags: small sharp bumps along the ridge and down the faces.
       Math.abs(Math.sin(a * 41 + r * 0.011)) * 22 +
       Math.sin(a * 93 + r * 0.03) * 9;

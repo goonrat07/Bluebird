@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import type { Dog } from '../sim/dogs';
-import { PALETTE, addOutlines, rounded, toon } from './toon';
+import { PALETTE, rounded } from './toon';
+import { painted } from './characterAssets';
 
-// Two soft round dogs: Bowie in his red patrol vest, and scruffy Pepper.
+// Two soft round dogs, softly painted like the people: Bowie in his red patrol vest, and scruffy Pepper.
 
 const LOOK: Record<string, { coat: number; ears: number; vest: number | null }> = {
   Bowie: { coat: 0xd9a35a, ears: 0xa8703a, vest: PALETTE.terracotta },
@@ -10,7 +11,7 @@ const LOOK: Record<string, { coat: number; ears: number; vest: number | null }> 
 };
 
 const box = (w: number, h: number, d: number, color: number, x = 0, y = 0, z = 0): THREE.Mesh => {
-  const m = new THREE.Mesh(rounded(w, h, d), toon(color));
+  const m = new THREE.Mesh(rounded(w, h, d), painted(color));
   m.position.set(x, y, z);
   m.castShadow = true;
   return m;
@@ -44,7 +45,6 @@ export class DogModel {
       this.legs.push(leg);
       this.root.add(leg);
     }
-    addOutlines(this.root);
   }
 
   update(d: Dog, dt: number): void {

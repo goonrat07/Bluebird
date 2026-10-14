@@ -1,5 +1,6 @@
 import { Game, type Telemetry } from './game';
 import { SceneView } from './render/scene';
+import { loadCharacters } from './render/characterAssets';
 import type { Command } from './sim/input';
 import type { AssistLevel } from './sim/tuning';
 
@@ -23,6 +24,8 @@ declare global {
 }
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
+// The Blender-made characters load first; everything else is built in code.
+await loadCharacters();
 const game = new Game(new SceneView(canvas));
 game.start();
 window.__game = {
