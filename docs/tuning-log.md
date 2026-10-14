@@ -37,3 +37,15 @@ Player: "when i jump, if i was already holding like the a key, it doesn't turn t
 | Change | Old → new | Why |
 | --- | --- | --- |
 | Keys held through takeoff | ignored until pressed again → act immediately | Pre-loading a spin by holding A/D before the lip is how the player wants to ride. W/S follow the same rule, so a tuck held off a jump starts a frontflip. |
+
+## 2026-10-14 · Flow and gap sense in the glade
+
+Phase 2 vertical slice: the glade on the skier's left between z 470 and 770.
+
+| Change | Old → new | Why |
+| --- | --- | --- |
+| Flow (`FLOW`) | none → near misses within 2.4 m above 6 m/s build Flow, which drains after a 1.4 s grace | Rewards threading the trees. Full Flow cuts friction and drag by 30% and adds 50% to trick scores. |
+| Branch clips | none → passing within 0.4 m slows to 96% and costs 25% Flow, with a snow splat on screen | Brushing a tree should sting without being a crash. |
+| Crashes and glancing hits | none → a crash empties Flow; a glancing hit keeps 30% | Flow is earned by clean lines. |
+| Gap sense (`ASSIST.gapSense`, `GAP`) | none → relaxed 1.4, normal 1.1, real 0 | Gently steers away from a trunk dead ahead, looking 0.8 s down the line. Bot bails across 15 glade lines drop from 35 on real to 15 on normal and 6 on relaxed. |
+| Glade camera | standard → 4 m up, 5.5 m back, looking 5 m ahead; FOV widens with Flow | The high run camera hides the gaps between trees. |

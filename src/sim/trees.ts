@@ -1,6 +1,8 @@
 import { RUN, centerX, heightAt } from './terrain';
 
 export interface Tree {
+  /** Index in TREES. */
+  id: number;
   x: number;
   z: number;
   /** Overall size multiplier; trunk radius and height scale with it. */
@@ -18,7 +20,7 @@ function seeded(seed: number): () => number {
 function generate(): Tree[] {
   const rand = seeded(7);
   const trees: Tree[] = [];
-  const at = (u: number, z: number, scale: number) => trees.push({ x: centerX(z) + u, z, scale });
+  const at = (u: number, z: number, scale: number) => trees.push({ id: trees.length, x: centerX(z) + u, z, scale });
   const { glade } = RUN;
   // Thick forest on both banks, all the way down.
   for (let i = 0; i < 2400; i++) {
@@ -61,6 +63,16 @@ export function treesNear(x: number, z: number): Tree[] {
   const cz = Math.floor(z / CELL);
   const out: Tree[] = [];
   for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) out.push(...(grid.get(`${cx + i},${cz + j}`) ?? []));
+  return out;
+}
+
+/** Every tree whose grid cell overlaps a circle of `radius` around (x, z). */
+export function treesWithin(x: number, z: number, radius: number): Tree[] {
+  const out: Tree[] = [];
+  const r = Math.ceil(radius / CELL);
+  const cx = Math.floor(x / CELL);
+  const cz = Math.floor(z / CELL);
+  for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) out.push(...(grid.get(`${cx + i},${cz + j}`) ?? []));
   return out;
 }
 

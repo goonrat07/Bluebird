@@ -75,6 +75,7 @@ describe('riding', () => {
   it('powder is slower than groomed snow', () => {
     const groomed = ride(6).r;
     const start = createRider();
+    start.assist = 'real'; // keep gap sense from steering it out of the powder
     const x = centerX(300) + 30;
     start.pos = vec(x, heightAt(x, 300), 300);
     const before = start.pos.z;
@@ -204,9 +205,46 @@ describe('trees', () => {
     const target = TREES.reduce((best, t) =>
       Math.hypot(t.x - tree.x, t.z - tree.z) < Math.hypot(best.x - tree.x, best.z - tree.z) ? t : best,
     );
+    r.assist = 'real'; // no gap sense
     r.pos = vec(target.x, heightAt(target.x, target.z - 12), target.z - 12);
     r.vel = vec(0, 0, 14);
     ride(1.5, () => ({}), r);
     expect(r.lastTrick?.name).toBe('Bail');
+  });
+
+  it('gap sense eases you around a trunk you are about to hit', () => {
+    const tree = { x: centerX(600) + 30, z: 600 };
+    const target = TREES.reduce((best, t) =>
+      Math.hypot(t.x - tree.x, t.z - tree.z) < Math.hypot(best.x - tree.x, best.z - tree.z) ? t : best,
+    );
+    const r = createRider();
+    r.assist = 'relaxed';
+    // Slightly off-center, at a moderate speed: the nudge should be enough.
+    r.pos = vec(target.x + 0.2, heightAt(target.x + 0.2, target.z - 12), target.z - 12);
+    r.vel = vec(0, 0, 9);
+    ride(1.5, () => ({}), r);
+    expect(r.lastTrick?.name ?? 'none').not.toBe('Bail');
+  });
+
+  it('skimming past trees builds Flow, and it drains in the open', () => {
+    const r = createRider();
+    r.assist = 'real';
+    // A glade tree with a clear lane 1.5 m to one side of it.
+    const laneX = (t: (typeof TREES)[number]) => t.x + 1.5 + 0.28 * t.scale + 0.35;
+    const t = TREES.find((t) => {
+      const u = t.x - centerX(t.z);
+      if (t.z < 520 || t.z > 700 || u < 28 || u > 40) return false;
+      return !TREES.some((o) => o !== t && Math.abs(o.x - laneX(t)) < 1.6 && o.z > t.z - 14 && o.z < t.z + 4);
+    })!;
+    const x = laneX(t);
+    r.pos = vec(x, heightAt(x, t.z - 10), t.z - 10);
+    r.vel = vec(0, 0, 13);
+    ride(1.6, () => ({}), r);
+    expect(r.flow).toBeGreaterThan(0.05);
+    const built = r.flow;
+    const open = createRider();
+    Object.assign(open, { flow: built, flowIdle: 0 });
+    ride(6, () => ({}), open);
+    expect(open.flow).toBeLessThan(built);
   });
 });

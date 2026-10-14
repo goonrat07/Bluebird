@@ -98,3 +98,17 @@ test('landmarks down Kettle Run', async ({ page }) => {
   }
   expect(errors).toEqual([]);
 });
+
+test('riding the glade builds Flow', async ({ page }) => {
+  test.setTimeout(180_000); // the glade is the heaviest view for a software renderer
+  const errors: string[] = [];
+  await load(page, errors);
+  await page.evaluate(() => window.__game!.setAssist('relaxed'));
+  await page.evaluate(() => window.__game!.teleport(480, 31, 12));
+  // Ride the glade hands-off; relaxed gap sense threads the trunks.
+  await page.waitForFunction(() => window.__game!.telemetry().pos.z > 530, null, { timeout: 150_000 });
+  await page.screenshot({ path: 'test/artifacts/glade-flow.png' });
+  const t = await telemetry(page);
+  console.log(`glade: flow ${t.flow.toFixed(2)}, branch hits ${t.branchHits}, crashed ${t.crashed}`);
+  expect(errors).toEqual([]);
+});

@@ -142,6 +142,13 @@ export function normalAt(x: number, z: number): Vec3 {
   return normalize(vec(-dx, 2 * e, -dz));
 }
 
+/** True inside the glade (with a little margin), where the camera tucks in closer. */
+export function inGlade(x: number, z: number): boolean {
+  const u = lateral(x, z);
+  const g = RUN.glade;
+  return z > g.z0 - 10 && z < g.z1 + 10 && u > g.u0 - 2 && u < g.u1 + 8;
+}
+
 /** True anywhere on a kicker ramp. */
 export const onKicker = (x: number, z: number): boolean => kickerAt(lateral(x, z), z) !== null;
 

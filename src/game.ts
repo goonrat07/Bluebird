@@ -22,6 +22,8 @@ export interface Telemetry {
   lastTrick: string | null;
   landings: number;
   fps: number;
+  flow: number;
+  branchHits: number;
 }
 
 const STEP = 1 / WORLD.stepHz;
@@ -105,6 +107,8 @@ export class Game {
       lastTrick: r.lastTrick?.name ?? null,
       landings: r.landings,
       fps: this.fps,
+      flow: r.flow,
+      branchHits: r.branchHits,
     };
   }
 
@@ -154,12 +158,14 @@ export class Game {
         switch: isSwitch(r),
         justLanded: landed,
         deepSnow: r.snow === 'powder',
+        flow: r.flow,
       },
       dt,
       this.snapCamera,
     );
     this.snapCamera = false;
     this.hud.update(dt, speedOf(r) * 3.6, r.sport, r.assist, r.lastTrick, r.landings);
+    this.hud.updateFlow(dt, r.flow, r.branchHits);
 
     this.frame++;
     requestAnimationFrame((t) => this.tick(t));

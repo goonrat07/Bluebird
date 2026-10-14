@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RUN, centerX, heightAt, isNearLip, onKicker, snowAt } from '../sim/terrain';
+import { RUN, centerX, heightAt, inGlade, isNearLip, onKicker, snowAt } from '../sim/terrain';
 import { TREES, treeBaseY } from '../sim/trees';
 import type { SnowType } from '../sim/tuning';
 import type { Vec3 } from '../sim/vec';
@@ -20,6 +20,8 @@ export interface FrameView extends RiderPose {
   justLanded: boolean;
   /** Riding through powder, where tracks are deeper. */
   deepSnow: boolean;
+  /** 0..1 Flow meter; widens the view a little. */
+  flow: number;
 }
 
 // Per-snow-type tint on top of the preset's snow color: ice is glassy blue-gray, groomed a touch duller than powder.
@@ -41,6 +43,10 @@ export const CAMERA = {
   lookHeight: 0.6,
   /** Look this far ahead of the rider, so more of the run below is in view. */
   lookAhead: 2,
+  /** In the glade the camera drops lower and tighter. */
+  gladeHeight: 4,
+  gladeDistance: 5.5,
+  gladeLookAhead: 5,
 };
 
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -63,6 +69,7 @@ export class SceneView {
   private readonly camPos = new THREE.Vector3();
   private readonly camLook = new THREE.Vector3();
   private camYaw = 0;
+  private glade = 0;
   private presetIndex = 0;
   private time = 0;
 
@@ -171,17 +178,23 @@ export class SceneView {
 
     // Higher than a classic chase cam, looking down the hill: between Riders Republic and Grand Mountain Adventure.
     const back = new THREE.Vector3(-Math.sin(this.camYaw), 0, -Math.cos(this.camYaw));
-    const distance = CAMERA.distance + Math.min(CAMERA.speedDistanceMax, v.speed * CAMERA.speedDistance);
+    const gladeTarget = inGlade(v.pos.x, v.pos.z) ? 1 : 0;
+    this.glade = snap ? gladeTarget : this.glade + (gladeTarget - this.glade) * (1 - Math.exp(-1.5 * dt));
+    const g = this.glade;
+    const distance =
+      CAMERA.distance + (CAMERA.gladeDistance - CAMERA.distance) * g + Math.min(CAMERA.speedDistanceMax, v.speed * CAMERA.speedDistance);
+    const height = CAMERA.height + (CAMERA.gladeHeight - CAMERA.height) * g;
+    const lookAhead = CAMERA.lookAhead + (CAMERA.gladeLookAhead - CAMERA.lookAhead) * g;
     const desired = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z).addScaledVector(back, distance);
-    desired.y = Math.max(v.pos.y + CAMERA.height, heightAt(desired.x, desired.z) + 2);
-    const look = new THREE.Vector3(v.pos.x, v.pos.y + CAMERA.lookHeight, v.pos.z).addScaledVector(back, -CAMERA.lookAhead);
+    desired.y = Math.max(v.pos.y + height, heightAt(desired.x, desired.z) + 2);
+    const look = new THREE.Vector3(v.pos.x, v.pos.y + CAMERA.lookHeight, v.pos.z).addScaledVector(back, -lookAhead);
     const kp = snap ? 1 : 1 - Math.exp(-7 * dt);
     this.camPos.lerp(desired, kp);
     this.camLook.lerp(look, kp);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
 
-    const fov = 62 + Math.min(16, v.speed * 0.35);
+    const fov = 62 + Math.min(16, v.speed * 0.35) + v.flow * 6;
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-3 * dt));
       this.camera.updateProjectionMatrix();

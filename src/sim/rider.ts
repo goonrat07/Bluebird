@@ -1,6 +1,6 @@
-import { AIR, ASSIST, CRASH, RIDE, SNOW, SPORTS, WORLD, type AssistLevel, type SnowType, type Sport } from './tuning';
+import { AIR, ASSIST, CRASH, FLOW, GAP, RIDE, SNOW, SPORTS, WORLD, type AssistLevel, type SnowType, type Sport } from './tuning';
 import { START, heightAt, isNearLip, normalAt, snowAt } from './terrain';
-import { TRUNK_RADIUS, treesNear } from './trees';
+import { TRUNK_RADIUS, treesNear, treesWithin } from './trees';
 import { type AirLog, type GrabDir, type LandingQuality, type Trick, grabName, scoreTrick } from './tricks';
 import type { RideInput } from './input';
 import { type Vec3, add, dot, length, normalize, projectOnPlane, scale, sub, vec } from './vec';
@@ -47,6 +47,14 @@ export interface RiderState {
   lastTrick: Trick | null;
   /** Increments every time a jump ends (trick, bail or nothing), so the HUD can spot new results. */
   landings: number;
+  /** 0..1 Flow meter from near misses with trees. */
+  flow: number;
+  /** Seconds since the last near miss (Flow drains once this passes the grace time). */
+  flowIdle: number;
+  /** Increments every time the rider clips branches (the camera gets a face full of snow). */
+  branchHits: number;
+  /** The tree whose branches were last clipped, so one tree only counts once per pass. */
+  lastBranchTree: number;
   time: number;
 }
 
@@ -82,6 +90,10 @@ export function createRider(sport: Sport = 'board', assist: AssistLevel = 'norma
     safeTimer: 0,
     lastTrick: null,
     landings: 0,
+    flow: 0,
+    flowIdle: 0,
+    branchHits: 0,
+    lastBranchTree: -1,
     time: 0,
   };
 }
@@ -113,6 +125,7 @@ export function stepRider(r: RiderState, input: RideInput, dt: number): void {
   r.vel = add(r.vel, vec(0, -WORLD.gravity * dt, 0));
   r.pos = add(r.pos, scale(r.vel, dt));
   collideTrees(r);
+  updateFlow(r, dt);
   resolveGround(r);
 }
 
@@ -159,11 +172,14 @@ function stepGround(r: RiderState, input: RideInput, dt: number): void {
   // Friction, air drag and powder all slow the rider down.
   const sink = snow.sinkDrag * (1.5 - sport.powderFloat * Math.min(1, speed / 12));
   const mu = r.braking ? RIDE.brakeFriction : snow.friction * sport.frictionScale + sink;
-  const drag = sport.airDrag * (r.tucking ? sport.tuckDrag : 1) * speed * speed;
+  const flowEase = 1 - FLOW.speedBoost * r.flow;
+  const drag = sport.airDrag * (r.tucking ? sport.tuckDrag : 1) * speed * speed * flowEase;
   const scrub = latLeft * 1.5;
-  const decel = mu * WORLD.gravity * n.y + drag + scrub;
+  const decel = mu * flowEase * WORLD.gravity * n.y + drag + scrub;
   const s = length(r.vel);
   if (s > 1e-6) r.vel = scale(r.vel, Math.max(0, s - decel * dt) / s);
+
+  gapSense(r, dt);
 
   // Skiers skate on the flats with W.
   r.skateTimer -= dt;
@@ -280,6 +296,7 @@ function crash(r: RiderState): void {
   r.edge = 0;
   r.skidding = false;
   r.lastTrick = { name: 'Bail', score: 0, quality: 'sketchy' };
+  r.flow = 0;
   r.landings++;
 }
 
@@ -314,6 +331,7 @@ function land(r: RiderState, n: Vec3): void {
   const quality: LandingQuality =
     errDeg <= assist.cleanDeg ? 'clean' : errDeg <= (assist.cleanDeg + assist.surviveDeg) / 2 ? 'solid' : 'sketchy';
   const trick = scoreTrick(r.sport, air, quality);
+  if (trick) trick.score = Math.round(trick.score * (1 + FLOW.trickBonus * r.flow));
   if (trick) {
     r.lastTrick = trick;
     r.landings++;
@@ -355,9 +373,72 @@ function collideTrees(r: RiderState): void {
     r.pos = add(r.pos, scale(away, minDist - dist));
     if (into <= 0) continue;
     if (!r.crashed && into > CRASH.treeCrashSpeed) crash(r);
+    else r.flow *= FLOW.glanceFlowKeep;
     // Glancing blow: lose the into-the-trunk part and some speed, keep riding.
     r.vel = scale(add(r.vel, scale(away, into)), r.crashed ? 0.3 : CRASH.glanceKeep);
   }
+}
+
+/** Near misses build Flow, clipped branches cost it, and it drains when you leave the trees. */
+function updateFlow(r: RiderState, dt: number): void {
+  r.flowIdle += dt;
+  const speed = length(r.vel);
+  if (!r.crashed && speed > FLOW.minSpeed) {
+    const ground = heightAt(r.pos.x, r.pos.z);
+    for (const t of treesNear(r.pos.x, r.pos.z)) {
+      if (r.pos.y - ground > 5.5 * t.scale) continue;
+      const gap = Math.hypot(r.pos.x - t.x, r.pos.z - t.z) - TRUNK_RADIUS * t.scale - CRASH.riderRadius;
+      if (gap < 0 || gap > FLOW.nearDist) continue;
+      if (gap < FLOW.branchDist * t.scale) {
+        // Too close: you clip the branches. Once per tree per pass.
+        if (r.lastBranchTree !== t.id) {
+          r.lastBranchTree = t.id;
+          r.branchHits++;
+          r.vel = scale(r.vel, FLOW.branchSlow);
+          r.flow = Math.max(0, r.flow - FLOW.branchFlowLoss);
+        }
+        continue;
+      }
+      // Closer is worth more, and so is speed.
+      const closeness = 1 - gap / FLOW.nearDist;
+      r.flow = Math.min(1, r.flow + FLOW.gainRate * closeness * Math.min(1.5, speed / 12) * dt);
+      r.flowIdle = 0;
+    }
+  }
+  if (r.flowIdle > FLOW.grace) r.flow = Math.max(0, r.flow - FLOW.decay * dt);
+}
+
+/**
+ * Gap sense: look down the line you're riding and, if a trunk is in the way, ease the direction of travel
+ * toward the nearer open side. Strength depends on the assist setting; you still choose the line.
+ */
+function gapSense(r: RiderState, dt: number): void {
+  const strength = ASSIST[r.assist].gapSense;
+  const speed = Math.hypot(r.vel.x, r.vel.z);
+  if (strength <= 0 || speed < 3) return;
+  const dirX = r.vel.x / speed;
+  const dirZ = r.vel.z / speed;
+  const look = Math.min(GAP.lookMax, Math.max(GAP.lookMin, speed * GAP.lookTime));
+  let best: { along: number; side: number; clear: number } | null = null;
+  for (const t of treesWithin(r.pos.x, r.pos.z, look)) {
+    const dx = t.x - r.pos.x;
+    const dz = t.z - r.pos.z;
+    const along = dx * dirX + dz * dirZ;
+    if (along <= 0 || along > look) continue;
+    const side = dx * dirZ - dz * dirX; // positive: trunk is toward +x of the line of travel (the rider's left)
+    const clear = TRUNK_RADIUS * t.scale + CRASH.riderRadius + GAP.margin;
+    if (Math.abs(side) >= clear) continue;
+    if (!best || along < best.along) best = { along, side, clear };
+  }
+  if (!best) return;
+  // Steer away from the trunk, harder when it's close ahead and dead center.
+  const urgency = (1 - best.along / look) * (1 - Math.abs(best.side) / best.clear);
+  const away = best.side >= 0 ? -1 : 1; // positive yaw turns toward +x, so turn the other way from the trunk
+  const turn = away * strength * (0.4 + 0.6 * urgency) * dt;
+  const c = Math.cos(turn);
+  const sn = Math.sin(turn);
+  r.vel = vec(r.vel.x * c + r.vel.z * sn, r.vel.y, -r.vel.x * sn + r.vel.z * c);
+  r.heading = wrapAngle(r.heading + turn);
 }
 
 export function resetToSafeSpot(r: RiderState): void {
@@ -369,6 +450,7 @@ export function resetToSafeSpot(r: RiderState): void {
   fresh.safeSpots = [{ pos: { ...fresh.pos }, heading: spot.heading }];
   fresh.lastTrick = r.lastTrick;
   fresh.landings = r.landings;
+  fresh.branchHits = r.branchHits;
   fresh.time = r.time;
   Object.assign(r, fresh);
 }

@@ -21,6 +21,21 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8d6; }
 .trick-name.bail { opacity: 0.85; }
 .trick-score { display: block; font-size: 18px; opacity: 0.9; margin-top: 2px; }
 
+#flow {
+  position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; opacity: 0;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase;
+}
+#flow-track { width: 220px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
+#flow-fill { height: 100%; background: #fff3d6; transform-origin: left; transform: scaleX(0); box-shadow: 0 0 8px rgba(255, 230, 190, 0.8); }
+#flow.full #flow-fill { background: #ffd28a; }
+#splat {
+  position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(ellipse at 30% 35%, rgba(255, 255, 255, 0.95) 0 18%, transparent 40%),
+    radial-gradient(ellipse at 72% 60%, rgba(255, 255, 255, 0.9) 0 14%, transparent 34%),
+    radial-gradient(ellipse at 50% 85%, rgba(255, 255, 255, 0.85) 0 10%, transparent 28%);
+}
+
 #tuning {
   position: fixed; top: 12px; right: 12px; bottom: 12px; width: 320px; overflow-y: auto;
   background: rgba(16, 22, 34, 0.82); color: #e8eef7; border-radius: 10px; padding: 10px 12px;
