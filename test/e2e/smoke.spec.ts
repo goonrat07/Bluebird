@@ -92,6 +92,7 @@ test('skis swap in and the tuning panel opens', async ({ page }) => {
 });
 
 test('landmarks down Kettle Run', async ({ page }) => {
+  test.setTimeout(300_000); // five spots, each drawn in software GL
   const errors: string[] = [];
   await load(page, errors);
   // Fixed camera spots: the glade, the park line, the Kettle Wall and the finish.
