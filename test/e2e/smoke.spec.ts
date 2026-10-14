@@ -212,7 +212,7 @@ test('riding onto the park box grinds it', async ({ page }) => {
 });
 
 test('events: countdown, a ghost to chase, and a result', async ({ page }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(420_000); // two events, ridden in software GL
   const errors: string[] = [];
   await load(page, errors);
   await page.keyboard.press('Digit1');
