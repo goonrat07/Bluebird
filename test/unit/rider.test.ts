@@ -90,6 +90,28 @@ describe('riding', () => {
     expect(speedOf(pushed)).toBeGreaterThan(speedOf(coasted));
   });
 
+  it('keeps cruising speed believable: about 60-80 km/h, 90-ish in a tuck', () => {
+    for (const sport of ['board', 'ski'] as const) {
+      let top = 0;
+      let topTuck = 0;
+      ride(60, (_t, s) => ((top = Math.max(top, speedOf(s))), {}), createRider(sport));
+      ride(60, (_t, s) => ((topTuck = Math.max(topTuck, speedOf(s))), { up: true }), createRider(sport));
+      expect(top * 3.6).toBeLessThan(85);
+      expect(topTuck * 3.6).toBeLessThan(105);
+      expect(topTuck).toBeGreaterThan(top);
+    }
+  });
+
+  it('left turns the direction of travel left even when riding switch', () => {
+    for (const startHeading of [0, Math.PI]) {
+      const r = cruising();
+      r.heading = startHeading; // pi = board pointing uphill while sliding down (switch)
+      const before = Math.atan2(r.vel.x, r.vel.z);
+      ride(0.6, () => ({ left: true }), r);
+      expect(Math.atan2(r.vel.x, r.vel.z)).toBeGreaterThan(before + 0.1);
+    }
+  });
+
   it('never sinks below the snow', () => {
     const { minClearance } = ride(25, (t) => ({ left: t % 4 < 1.5, right: t % 4 > 2.5, jump: t % 3 < 0.3 }));
     expect(minClearance).toBeGreaterThanOrEqual(-1e-9);
@@ -128,6 +150,13 @@ describe('jumping and tricks', () => {
     const r = launched('ski');
     ride(4, (t) => ({ grab: t > 0.1 && t < 0.9, right: t > 0.1 && t < 0.9 }), r);
     expect(r.lastTrick?.name).toBe('Safety');
+  });
+
+  it('holding a tuck off a jump does not start a flip', () => {
+    const r = cruising();
+    ride(0.5, () => ({ up: true, jump: true }), r);
+    ride(3, () => ({ up: true }), r);
+    expect(r.lastTrick?.name ?? 'Air').not.toMatch(/flip|Bail/);
   });
 
   it('lands a backflip', () => {
