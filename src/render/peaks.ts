@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const PEAKS = { lift: 1.5, sink: 300 };
+
 // A ring of distant low-poly peaks around the run. Fog fades them toward the sky, which gives the mountain scale.
 export function buildPeaks(center: THREE.Vector3): THREE.Mesh {
   const ringSegments = 96;
@@ -11,7 +13,8 @@ export function buildPeaks(center: THREE.Vector3): THREE.Mesh {
     const ridge =
       Math.abs(Math.sin(a * 3.1 + 0.6)) * 260 + Math.abs(Math.sin(a * 7.3 + 2.1)) * 120 + Math.abs(Math.sin(a * 17.7)) * 50;
     const fall = Math.sin(((r - inner) / (outer - inner)) * Math.PI); // rises from the inner edge, falls off behind
-    return ridge * fall - 120;
+    // Tall enough to stand over Kettle Peak's summit, and sunk at the inner edge so no sky shows beneath.
+    return ridge * PEAKS.lift * fall - 120 - PEAKS.sink * (1 - fall);
   };
   const point = (i: number, j: number): [number, number, number] => {
     const a = (i / ringSegments) * Math.PI * 2;

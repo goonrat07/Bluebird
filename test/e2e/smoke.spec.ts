@@ -56,10 +56,10 @@ test('jumping, spinning and landing produce a result', async ({ page }) => {
   await page.keyboard.down('Space');
   await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 20, holdFrom);
   await page.keyboard.up('Space');
-  await page.waitForFunction(() => !window.__game!.telemetry().grounded, null, { timeout: 5_000 });
+  await page.waitForFunction(() => !window.__game!.telemetry().grounded, null, { timeout: 30_000 });
   await page.keyboard.down('KeyA');
   await page.screenshot({ path: 'test/artifacts/air.png' });
-  await page.waitForFunction(() => window.__game!.telemetry().grounded, null, { timeout: 10_000 });
+  await page.waitForFunction(() => window.__game!.telemetry().grounded, null, { timeout: 60_000 }); // a jump can span many slow frames
   await page.keyboard.up('KeyA');
 
   const t = await telemetry(page);
@@ -84,12 +84,15 @@ test('skis swap in and the tuning panel opens', async ({ page }) => {
   // The style guide asks for every look at golden hour (the default) and at noon.
   await page.keyboard.press('Backquote');
   await page.keyboard.press('KeyT');
-  await page.waitForTimeout(300);
+  // Wait for whole frames drawn in the new light, not wall time: software GL can be slow.
+  const lit = (await telemetry(page)).frame;
+  await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 3, lit);
   await page.screenshot({ path: 'test/artifacts/noon.png' });
   expect(errors).toEqual([]);
 });
 
 test('landmarks down Kettle Run', async ({ page }) => {
+  test.setTimeout(300_000); // five spots, each drawn in software GL
   const errors: string[] = [];
   await load(page, errors);
   // Fixed camera spots: the glade, the park line, the Kettle Wall and the finish.
@@ -105,6 +108,28 @@ test('landmarks down Kettle Run', async ({ page }) => {
     const f = (await telemetry(page)).frame;
     await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 10, f);
     await page.screenshot({ path: `test/artifacts/spot-${name}.png` });
+  }
+  expect(errors).toEqual([]);
+});
+
+test('the rest of Kettle Peak', async ({ page }) => {
+  test.setTimeout(300_000); // six spots, each drawn in software GL
+  const errors: string[] = [];
+  await load(page, errors);
+  // A spot on each of the other runs, and one looking across from Kettle at a branch.
+  const spots: [string, string, number, number][] = [
+    ['cornice', 'cornice', -330, 0],
+    ['couloir', 'couloir', -300, 0],
+    ['raven-traverse', 'raven', 300, 0],
+    ['raven-face', 'raven', 490, 0],
+    ['fernwood', 'fernwood', 1050, 0],
+    ['fernwood-base', 'fernwood', 1420, 0],
+  ];
+  for (const [name, run, z, u] of spots) {
+    await page.evaluate(([run, z, u]) => window.__game!.teleport(z as number, u as number, 6, run as string), [run, z, u]);
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 10, f);
+    await page.screenshot({ path: `test/artifacts/peak-${name}.png` });
   }
   expect(errors).toEqual([]);
 });

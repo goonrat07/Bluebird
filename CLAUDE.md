@@ -17,7 +17,10 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `src/render/` – three.js drawing only; reads sim state, never changes it.
 - `src/game.ts` – fixed 120 Hz step with interpolated rendering.
 - `window.__game` – debug hook for play tests (`ready`, `telemetry()`, `command()`, `setAssist()`, `teleport(z, u)`).
-- `src/sim/terrain.ts` – Kettle Run: pitch profile, winding centerline, kickers. Measure across the run with `lateral()`.
+- `src/sim/terrain.ts` – Kettle Peak. Kettle Run (pitch profile, winding centerline, kickers; measure across it with `lateral()`)
+  plus the other runs in `RUNS` (Cornice Chute, Kettle Couloir, Raven's Drop, Fernwood), each a valley along its own centerline,
+  blended into a forested mountain. Kettle's snow inside its corridor must stay exactly as it is; `runAt()` finds the run under a point.
+- `src/render/mountain.ts` – the terrain mesh: a fine ribbon per run plus a coarser forest grid and far apron, all in culled chunks.
 - `src/render/presets/` – time-of-day light presets (T cycles in game).
 - `src/sim/rails.ts` – park rails and boxes; grinding lives in `rider.ts`.
 - `src/sim/events.ts` – events (start, finish, scoring, medals); `src/sim/replay.ts` records rides as one input mask per step.

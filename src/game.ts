@@ -110,9 +110,9 @@ export class Game {
   }
 
   /** Debug: puts the rider at distance z down the run, u metres off the centerline, moving downhill. */
-  teleport(z: number, u = 0, speed = 10): void {
+  teleport(z: number, u = 0, speed = 10, run = 'kettle'): void {
     const r = createRider(this.rider.sport, this.rider.assist);
-    placeRider(r, z, u, speed);
+    placeRider(r, z, u, speed, run);
     this.event = null;
     this.useRider(r);
   }

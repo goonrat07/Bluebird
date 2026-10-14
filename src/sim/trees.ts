@@ -1,4 +1,4 @@
-import { RUN, centerX, heightAt } from './terrain';
+import { MOUNTAIN_BOUNDS, RUN, RUNS, centerX, heightAt, lateral, normalAt } from './terrain';
 
 export interface Tree {
   /** Index in TREES. */
@@ -43,8 +43,42 @@ function generate(): Tree[] {
       at(u + (rand() - 0.5) * 4, z + (rand() - 0.5) * 4, 0.8 + rand() * 0.5);
     }
   }
-  return trees;
+  // Kettle's banks open where the other runs branch off.
+  const open = trees.filter((t) => !RUNS.some((r) => r.id !== 'kettle' && r.outside(t.x, t.z) < -2));
+  // Then forest over the rest of the mountain: a jittered grid, thicker near the runs, thinning
+  // out farther away, and none on the runs or on rock too steep to hold trees.
+  const B = MOUNTAIN_BOUNDS;
+  for (let z = B.z0; z < B.z1; z += FOREST.spacing) {
+    for (let x = B.x0; x < B.x1; x += FOREST.spacing) {
+      const tx = x + (rand() - 0.5) * FOREST.spacing * 0.8;
+      const tz = z + (rand() - 0.5) * FOREST.spacing * 0.8;
+      const keep = rand();
+      const scale = 0.7 + rand() * 0.8;
+      // Kettle's own banks were planted above.
+      if (Math.abs(lateral(tx, tz)) < 80 && tz > -40) continue;
+      let nearest = Infinity;
+      for (const r of RUNS) nearest = Math.min(nearest, r.outside(tx, tz));
+      if (nearest < FOREST.edge) continue;
+      if (keep > (nearest < FOREST.near ? FOREST.nearDensity : FOREST.farDensity)) continue;
+      if (normalAt(tx, tz).y < FOREST.steepest) continue;
+      open.push({ id: 0, x: tx, z: tz, scale });
+    }
+  }
+  open.forEach((t, i) => (t.id = i));
+  return open;
 }
+
+/** The forest beyond Kettle Run's banks. */
+const FOREST = {
+  spacing: 8,
+  /** Trees start this far outside a run's edge (negative: a little way into its powder). */
+  edge: -6,
+  near: 45,
+  nearDensity: 0.75,
+  farDensity: 0.3,
+  /** Snow normal's up component below which it's rock, not forest (about 42 degrees). */
+  steepest: 0.74,
+};
 
 export const TREES: readonly Tree[] = generate();
 

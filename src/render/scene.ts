@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { RUN, centerX, heightAt, inGlade, isNearLip, onKicker, snowAt } from '../sim/terrain';
-import { TREES, treeBaseY } from '../sim/trees';
-import type { SnowType } from '../sim/tuning';
+import { RUN, centerX, heightAt, inGlade } from '../sim/terrain';
+import { buildMountain } from './mountain';
+import { TREES, type Tree, treeBaseY } from '../sim/trees';
 import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
 import { buildPark } from './park';
@@ -26,15 +26,6 @@ export interface FrameView extends RiderPose {
   /** On a rail or box: no tracks or spray in the snow. */
   grinding: boolean;
 }
-
-// Per-snow-type tint on top of the preset's snow color: ice is glassy blue-gray, groomed a touch duller than powder.
-const SNOW_TINTS: Record<SnowType, THREE.Color> = {
-  groomed: new THREE.Color(0.95, 0.95, 0.96),
-  powder: new THREE.Color(1, 1, 1),
-  ice: new THREE.Color(0.78, 0.85, 0.95),
-};
-const KICKER_TINT = new THREE.Color(0.86, 0.89, 0.97);
-const LIP_TINT = new THREE.Color(0.55, 0.65, 0.88);
 
 export const CAMERA = {
   /** Metres behind the rider at a standstill, plus more with speed. */
@@ -97,7 +88,7 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
@@ -156,6 +147,8 @@ export class SceneView {
   }
 
   /** Draws one frame. `snap` jumps the camera into place instead of easing (used after a reset). */
+  private readonly forest = buildTrees();
+
   render(v: FrameView, dt: number, snap = false): void {
     this.rider.root.position.set(v.pos.x, v.pos.y, v.pos.z);
     this.rider.update(v, dt);
@@ -169,6 +162,8 @@ export class SceneView {
     // The shadow box follows the rider; the sun keeps its direction.
     this.sun.target.position.copy(at);
     this.sun.position.copy(at).addScaledVector(this.sunDir, 200);
+    // Forest patches far past the fog are skipped; the snow beneath them still reads at that distance.
+    for (const patch of this.forest.children) patch.visible = patch.position.distanceTo(this.camera.position) < FOREST_DRAW + TREE_PATCH;
     this.time += dt;
     this.post.render(this.time);
   }
@@ -217,53 +212,6 @@ export class SceneView {
   }
 }
 
-function buildSlope(material: THREE.Material): THREE.Mesh {
-  // A grid laid along the run's centerline: rows down the hill, columns across it.
-  const U = 95;
-  const cols = 150;
-  const z0 = -120;
-  const z1 = RUN.length + 260;
-  const rows = 1250;
-  const positions = new Float32Array((rows + 1) * (cols + 1) * 3);
-  const colors = new Float32Array((rows + 1) * (cols + 1) * 3);
-  const c = new THREE.Color();
-  for (let r = 0; r <= rows; r++) {
-    const z = z0 + ((z1 - z0) * r) / rows;
-    const cx = centerX(z);
-    for (let k = 0; k <= cols; k++) {
-      const u = -U + (2 * U * k) / cols;
-      const x = cx + u;
-      const i = r * (cols + 1) + k;
-      positions.set([x, heightAt(x, z), z], i * 3);
-      c.copy(SNOW_TINTS[snowAt(x, z)]);
-      // Soft wind-carved variation so big sunlit faces aren't one flat color.
-      const wind = 1 - 0.035 * (Math.sin(x * 0.21 + z * 0.13) * Math.sin(z * 0.37 - x * 0.05) + 1);
-      c.multiplyScalar(wind);
-      if (onKicker(x, z)) c.multiply(KICKER_TINT);
-      if (isNearLip(x, z)) c.copy(LIP_TINT); // mark the lip so it's easy to time the pop
-      colors.set([c.r, c.g, c.b], i * 3);
-    }
-  }
-  const index: number[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let k = 0; k < cols; k++) {
-      const a = r * (cols + 1) + k;
-      const b = a + 1;
-      const d = a + cols + 1;
-      const e = d + 1;
-      index.push(a, d, b, b, d, e); // counter-clockwise from above, so normals face up
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.setIndex(index);
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, material);
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
 /** A simple finish banner across the run at the bottom of the Kettle Wall. */
 function buildFinish(): THREE.Group {
   const g = new THREE.Group();
@@ -286,7 +234,7 @@ function buildFinish(): THREE.Group {
   return g;
 }
 
-function buildTrees(): THREE.Object3D[] {
+function buildTrees(): THREE.Group {
   // Dark evergreen crowns carrying a load of snow on each tier.
   const crownGeo = new THREE.ConeGeometry(1.4, 5, 7);
   crownGeo.translate(0, 3.5, 0);
@@ -298,22 +246,48 @@ function buildTrees(): THREE.Object3D[] {
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.28, 1.2, 6);
   trunkGeo.translate(0, 0.6, 0);
   const flat = (color: number) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.95 });
-  const crowns = new THREE.InstancedMesh(crownGeo, flat(0x3f6657), TREES.length);
-  const caps = new THREE.InstancedMesh(capGeo, flat(0xf3f1ef), TREES.length);
-  const trunks = new THREE.InstancedMesh(trunkGeo, flat(0x5a4038), TREES.length);
-  crowns.castShadow = caps.castShadow = true;
+  const crownMat = flat(0x3f6657);
+  const capMat = flat(0xf3f1ef);
+  const trunkMat = flat(0x5a4038);
+  // The forest is split into square patches so patches out of view (and out of the shadow map) are skipped.
+  const patches = new Map<string, Tree[]>();
+  for (const t of TREES) {
+    const key = `${Math.floor(t.x / TREE_PATCH)},${Math.floor(t.z / TREE_PATCH)}`;
+    const list = patches.get(key);
+    if (list) list.push(t);
+    else patches.set(key, [t]);
+  }
+  const forest = new THREE.Group();
   const m = new THREE.Matrix4();
   const spin = new THREE.Matrix4();
-  TREES.forEach((t, i) => {
-    // A little random rotation and squash so the forest doesn't look stamped.
-    spin.makeRotationY((t.x * 12.9898 + t.z * 78.233) % (Math.PI * 2));
-    m.makeScale(t.scale, t.scale * (0.9 + ((t.x * 7.1 + t.z) % 1 + 1) % 1 * 0.25), t.scale).premultiply(spin).setPosition(t.x, treeBaseY(t), t.z);
-    crowns.setMatrixAt(i, m);
-    caps.setMatrixAt(i, m);
-    trunks.setMatrixAt(i, m);
-  });
-  return [crowns, caps, trunks];
+  for (const [key, trees] of patches) {
+    // Each patch is a group placed at its centre, so it can be shown or hidden by distance.
+    const [px, pz] = key.split(',').map((n) => (Number(n) + 0.5) * TREE_PATCH);
+    const patch = new THREE.Group();
+    patch.position.set(px, heightAt(px, pz), pz);
+    const crowns = new THREE.InstancedMesh(crownGeo, crownMat, trees.length);
+    const caps = new THREE.InstancedMesh(capGeo, capMat, trees.length);
+    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, trees.length);
+    crowns.castShadow = caps.castShadow = true;
+    trees.forEach((t, i) => {
+      // A little random rotation and squash so the forest doesn't look stamped.
+      spin.makeRotationY((t.x * 12.9898 + t.z * 78.233) % (Math.PI * 2));
+      m.makeScale(t.scale, t.scale * (0.9 + ((t.x * 7.1 + t.z) % 1 + 1) % 1 * 0.25), t.scale).premultiply(spin).setPosition(t.x - px, treeBaseY(t) - patch.position.y, t.z - pz);
+      crowns.setMatrixAt(i, m);
+      caps.setMatrixAt(i, m);
+      trunks.setMatrixAt(i, m);
+    });
+    for (const mesh of [crowns, caps, trunks]) mesh.computeBoundingSphere();
+    patch.add(crowns, caps, trunks);
+    forest.add(patch);
+  }
+  return forest;
 }
+
+/** Size (m) of each square patch of forest drawn together. */
+const TREE_PATCH = 120;
+/** Forest is drawn out to about this far from the camera (m). */
+const FOREST_DRAW = 450;
 
 /** Crown radius at height y (the crown is a cone from y = 1 to y = 6 with base radius 1.4). */
 const crownRadius = (y: number): number => Math.max(0, (1.4 * (6 - y)) / 5);
