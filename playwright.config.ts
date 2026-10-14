@@ -5,7 +5,7 @@ const executablePath = process.env.PW_CHROMIUM_PATH || undefined;
 
 export default defineConfig({
   testDir: 'test/e2e',
-  timeout: 60_000,
+  timeout: 120_000, // software-rendered CI draws the forest slowly
   use: {
     baseURL: 'http://localhost:4173',
     viewport: { width: 1280, height: 720 },

@@ -16,7 +16,9 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `src/sim/tuning.ts` – every number that shapes riding feel. No magic numbers in rider code.
 - `src/render/` – three.js drawing only; reads sim state, never changes it.
 - `src/game.ts` – fixed 120 Hz step with interpolated rendering.
-- `window.__game` – debug hook for play tests (`ready`, `telemetry()`, `reset()`).
+- `window.__game` – debug hook for play tests (`ready`, `telemetry()`, `command()`, `setAssist()`, `teleport(z, u)`).
+- `src/sim/terrain.ts` – Kettle Run: pitch profile, winding centerline, kickers. Measure across the run with `lateral()`.
+- `src/render/presets/` – time-of-day light presets (T cycles in game).
 
 ## Conventions
 - Keyboard only. Tricks must never need more than two keys at once.

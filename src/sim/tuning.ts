@@ -125,12 +125,14 @@ export interface AssistTuning {
   grabLandingOk: boolean;
   /** When you let go of a spin or flip within this many degrees of a landable angle, it finishes itself. */
   rotationSnapDeg: number;
+  /** How hard gap sense nudges you toward the open gap you're heading for (rad/s at full strength; 0 = off). */
+  gapSense: number;
 }
 
 export const ASSIST: Record<AssistLevel, AssistTuning> = {
-  relaxed: { surviveDeg: 55, cleanDeg: 25, grabLandingOk: true, rotationSnapDeg: 100 },
-  normal: { surviveDeg: 35, cleanDeg: 15, grabLandingOk: false, rotationSnapDeg: 70 },
-  real: { surviveDeg: 20, cleanDeg: 8, grabLandingOk: false, rotationSnapDeg: 0 },
+  relaxed: { surviveDeg: 55, cleanDeg: 25, grabLandingOk: true, rotationSnapDeg: 100, gapSense: 1.4 },
+  normal: { surviveDeg: 35, cleanDeg: 15, grabLandingOk: false, rotationSnapDeg: 70, gapSense: 1.1 },
+  real: { surviveDeg: 20, cleanDeg: 8, grabLandingOk: false, rotationSnapDeg: 0, gapSense: 0 },
 };
 
 export const CRASH = {
@@ -144,4 +146,38 @@ export const CRASH = {
   glanceKeep: 0.6,
   /** Rider collision radius (m). */
   riderRadius: 0.35,
+};
+
+/** Flow: riding close past trees without touching them fills a meter that pays back in speed and points. */
+export const FLOW = {
+  /** Passing a trunk closer than this (m, edge to edge) builds Flow; closer builds faster. */
+  nearDist: 2.4,
+  /** Flow gained per second while skimming a trunk at the closest distance. */
+  gainRate: 1.6,
+  /** Riders slower than this (m/s) don't build Flow. */
+  minSpeed: 6,
+  /** Seconds after the last near miss before Flow starts draining. */
+  grace: 1.4,
+  /** Flow lost per second once draining. */
+  decay: 0.22,
+  /** At full Flow, drag and snow friction drop by this share. */
+  speedBoost: 0.3,
+  /** At full Flow, trick scores go up by this share. */
+  trickBonus: 0.5,
+  /** Clipping branches within this distance of a trunk (m, edge to edge, scaled with the tree) costs speed and Flow. */
+  branchDist: 0.4,
+  branchSlow: 0.96,
+  branchFlowLoss: 0.25,
+  /** Share of Flow kept after glancing off a trunk. */
+  glanceFlowKeep: 0.3,
+};
+
+/** Gap sense: how far ahead it looks for the trunk you're about to hit. */
+export const GAP = {
+  /** Look-ahead time (s) and its limits (m). */
+  lookTime: 0.8,
+  lookMin: 4,
+  lookMax: 16,
+  /** Extra clearance (m) it aims to leave beside a trunk. */
+  margin: 0.6,
 };

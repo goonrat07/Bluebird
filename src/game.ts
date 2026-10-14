@@ -1,4 +1,5 @@
 import { WORLD, type AssistLevel } from './sim/tuning';
+import { centerX, heightAt } from './sim/terrain';
 import { createRider, isSwitch, resetToSafeSpot, restart, speedOf, stepRider, swapSport, type RiderState } from './sim/rider';
 import { Keyboard, noInput, type Command, type RideInput } from './sim/input';
 import { SceneView } from './render/scene';
@@ -21,6 +22,8 @@ export interface Telemetry {
   lastTrick: string | null;
   landings: number;
   fps: number;
+  flow: number;
+  branchHits: number;
 }
 
 const STEP = 1 / WORLD.stepHz;
@@ -66,6 +69,23 @@ export class Game {
     }
   }
 
+  /** Debug: puts the rider at distance z down the run, u metres off the centerline, moving downhill. */
+  teleport(z: number, u = 0, speed = 10): void {
+    const x = centerX(z) + u;
+    const r = createRider(this.rider.sport, this.rider.assist);
+    r.pos = { x, y: heightAt(x, z), z };
+    // Moving along the snow surface, so the rider doesn't launch off a steep pitch.
+    const drop = heightAt(x, z + 1) - heightAt(x, z);
+    r.vel = { x: 0, y: (speed * drop) / Math.hypot(1, drop), z: speed / Math.hypot(1, drop) };
+    r.safeSpots = [{ pos: { ...r.pos }, heading: 0 }];
+    this.rider = r;
+    this.prevPos = { ...r.pos };
+    this.prevHeading = r.heading;
+    this.prevPitch = r.pitch;
+    this.snapCamera = true;
+    this.view.clearTrails();
+  }
+
   setAssist(level: AssistLevel): void {
     this.rider.assist = level;
   }
@@ -87,6 +107,8 @@ export class Game {
       lastTrick: r.lastTrick?.name ?? null,
       landings: r.landings,
       fps: this.fps,
+      flow: r.flow,
+      branchHits: r.branchHits,
     };
   }
 
@@ -136,12 +158,14 @@ export class Game {
         switch: isSwitch(r),
         justLanded: landed,
         deepSnow: r.snow === 'powder',
+        flow: r.flow,
       },
       dt,
       this.snapCamera,
     );
     this.snapCamera = false;
     this.hud.update(dt, speedOf(r) * 3.6, r.sport, r.assist, r.lastTrick, r.landings);
+    this.hud.updateFlow(dt, r.flow, r.branchHits);
 
     this.frame++;
     requestAnimationFrame((t) => this.tick(t));

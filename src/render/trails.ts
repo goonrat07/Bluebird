@@ -20,7 +20,7 @@ export class Trails {
       vertexColors: true,
       roughness: 1,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.32,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -2,
@@ -53,7 +53,7 @@ export class Trails {
     const a = this.last.left, b = this.last.right;
     this.positions.set([a.x, a.y, a.z, b.x, b.y, b.z, left.x, left.y, left.z, left.x, left.y, left.z, b.x, b.y, b.z, right.x, right.y, right.z], k * 18);
     // Groomed tracks are a faint cut; powder tracks are a deep lavender trench.
-    const c = deep ? [0.62, 0.64, 0.82] : [0.82, 0.84, 0.92];
+    const c = deep ? [0.55, 0.56, 0.78] : [0.78, 0.79, 0.9];
     for (let v = 0; v < 6; v++) this.colors.set(c, k * 18 + v * 3);
     this.last = { left, right, center };
     const geo = this.mesh.geometry;
