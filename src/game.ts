@@ -131,6 +131,7 @@ export class Game {
         braking: r.braking,
         skidding: r.skidding,
         grab: r.grab,
+        switch: isSwitch(r),
         justLanded: landed,
       },
       dt,

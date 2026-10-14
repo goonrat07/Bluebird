@@ -21,6 +21,18 @@ const SNOW_COLORS: Record<SnowType, THREE.Color> = {
 };
 const KICKER_TINT = new THREE.Color(0xc9d6e8);
 
+export const CAMERA = {
+  /** Metres behind the rider at a standstill, plus more with speed. */
+  distance: 7,
+  speedDistance: 0.07,
+  speedDistanceMax: 3,
+  /** Metres above the rider. */
+  height: 7.5,
+  lookHeight: 0.6,
+  /** Look this far ahead of the rider, so more of the run below is in view. */
+  lookAhead: 2,
+};
+
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
 // Gray-box look for the feel prototype; the real art direction arrives in Phase 2.
@@ -70,7 +82,7 @@ export class SceneView {
   /** Draws one frame. `snap` jumps the camera into place instead of easing (used after a reset). */
   render(v: FrameView, dt: number, snap = false): void {
     this.rider.root.position.set(v.pos.x, v.pos.y, v.pos.z);
-    this.rider.update(v);
+    this.rider.update(v, dt);
     this.emitSpray(v);
     this.spray.update(dt);
     this.updateCamera(v, dt, snap);
@@ -97,11 +109,12 @@ export class SceneView {
     const k = snap ? 1 : 1 - Math.exp(-4 * dt);
     this.camYaw = snap ? v.heading : lerpAngle(this.camYaw, travelYaw, k);
 
+    // Higher than a classic chase cam, looking down the hill: between Riders Republic and Grand Mountain Adventure.
     const back = new THREE.Vector3(-Math.sin(this.camYaw), 0, -Math.cos(this.camYaw));
-    const distance = 6.5 + Math.min(4, v.speed * 0.08);
+    const distance = CAMERA.distance + Math.min(CAMERA.speedDistanceMax, v.speed * CAMERA.speedDistance);
     const desired = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z).addScaledVector(back, distance);
-    desired.y = Math.max(desired.y + 3, heightAt(desired.x, desired.z) + 1.5);
-    const look = new THREE.Vector3(v.pos.x, v.pos.y + 1, v.pos.z).addScaledVector(back, -5);
+    desired.y = Math.max(v.pos.y + CAMERA.height, heightAt(desired.x, desired.z) + 2);
+    const look = new THREE.Vector3(v.pos.x, v.pos.y + CAMERA.lookHeight, v.pos.z).addScaledVector(back, -CAMERA.lookAhead);
     const kp = snap ? 1 : 1 - Math.exp(-7 * dt);
     this.camPos.lerp(desired, kp);
     this.camLook.lerp(look, kp);
