@@ -16,6 +16,8 @@ declare global {
       placeAt: (x: number, z: number) => void;
       /** Jumps a lift ride along to a fraction of the way up (play tests only). */
       liftProgress: (f: number) => void;
+      /** Jumps to a time of day and weather by name, e.g. ('Night', 'Snowstorm'). */
+      setSky: (time: string, weather?: string) => void;
     };
   }
 }
@@ -31,4 +33,5 @@ window.__game = {
   teleport: (z, u, speed, run) => game.teleport(z, u, speed, run),
   placeAt: (x, z) => game.placeAt(x, z),
   liftProgress: (f) => game.liftProgress(f),
+  setSky: (time, weather) => game.setSky(time, weather),
 };

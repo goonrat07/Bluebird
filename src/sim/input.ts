@@ -1,7 +1,7 @@
 export interface RideInput {
   left: boolean;
   right: boolean;
-  /** W: tuck (or skate on skis when slow) on snow, front flip in the air. */
+  /** W: tuck on snow (push along with poles or a back foot when slow), front flip in the air. */
   up: boolean;
   /** S: brake on snow, back flip in the air. */
   down: boolean;
@@ -34,6 +34,7 @@ export type Command =
   | 'swapSport'
   | 'toggleTuning'
   | 'cycleLight'
+  | 'cycleWeather'
   | 'toggleMute'
   | 'slopestyle'
   | 'treeRun'
@@ -47,6 +48,7 @@ const COMMANDS: Record<string, Command> = {
   KeyF: 'swapSport',
   Backquote: 'toggleTuning',
   KeyT: 'cycleLight',
+  KeyY: 'cycleWeather',
   KeyM: 'toggleMute',
   Digit1: 'slopestyle',
   Digit2: 'treeRun',

@@ -46,6 +46,9 @@ export class Sound {
   private meter: AnalyserNode | null = null;
   private meterData: Float32Array<ArrayBuffer> | null = null;
   muted = false;
+  /** Weather wind (m/s), a gusting floor under the wind of your own speed. */
+  private gusts = 0;
+  private gustPhase = 0;
 
   constructor(target: Window) {
     // Browsers only allow audio after the player presses something.
@@ -128,14 +131,21 @@ export class Sound {
     param.setTargetAtTime(value, this.ctx!.currentTime, smoothing);
   }
 
+  /** Sets the weather's wind (m/s); a storm howls even when you stand still. */
+  setGusts(wind: number): void {
+    this.gusts = wind;
+  }
+
   /** Continuous layers, called every rendered frame. */
   update(f: SoundFrame): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const fast = Math.min(1, f.speed / 30);
     const airborne = !f.grounded && !f.grind;
     // Wind rises with speed, and opens up when you leave the snow.
-    this.set(this.wind.gain.gain, 0.02 + 0.3 * fast * fast + (airborne ? 0.06 : 0));
-    this.set(this.wind.filter.frequency, 260 + 900 * fast + (airborne ? 300 : 0));
+    this.gustPhase += 0.016;
+    const gust = Math.min(1, this.gusts / 8) * (0.6 + 0.4 * Math.sin(this.gustPhase * 0.9) * Math.sin(this.gustPhase * 0.37));
+    this.set(this.wind.gain.gain, 0.02 + 0.3 * fast * fast + (airborne ? 0.06 : 0) + 0.12 * gust);
+    this.set(this.wind.filter.frequency, 260 + 900 * fast + (airborne ? 300 : 0) + 250 * gust);
 
     // Edges in the snow: louder on edge and much louder skidding; each snow type has its own colour.
     const onSnow = f.grounded && !f.grind && !f.crashed;

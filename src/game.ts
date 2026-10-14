@@ -1,4 +1,4 @@
-import { WORLD, type AssistLevel } from './sim/tuning';
+import { SPORTS, WORLD, type AssistLevel } from './sim/tuning';
 import { RAILS } from './sim/rails';
 import { createRider, isSwitch, resetToSafeSpot, restart, speedOf, stepRider, swapSport, type RiderState } from './sim/rider';
 import { Keyboard, noInput, type Command, type RideInput } from './sim/input';
@@ -19,6 +19,7 @@ import { type Counter, counterAt, insideOf } from './sim/village';
 /** Jackets on the outfitters' rack; the first is the one you start in. */
 export const JACKETS = [0xe0563b, 0x2d6cc0, 0x2f8f5b, 0xe0b13b, 0x8b5bc4];
 const JACKET_KEY = 'bluebird.jacket';
+const SKY_KEY = 'bluebird.sky';
 /** Landing a trick worth this much near people gets a cheer. */
 const CHEER_SCORE = 250;
 /** You can only step out of your bindings this slow. */
@@ -62,6 +63,8 @@ export interface Telemetry {
   dogs: { name: string; x: number; z: number; following: boolean; happy: boolean }[];
   /** How many villagers are cheering right now. */
   cheering: number;
+  /** Time of day and weather on screen. */
+  sky: { time: string; weather: string };
   /** The event being ridden, if any. */
   event: {
     id: EventId;
@@ -114,6 +117,28 @@ export class Game {
       this.jacket = 0;
     }
     this.view.setJacket(JACKETS[this.jacket]);
+    try {
+      const sky = JSON.parse(localStorage.getItem(SKY_KEY) ?? 'null') as { time: string; weather: string } | null;
+      if (sky) this.view.setSky(sky.time, sky.weather);
+      this.sound.setGusts(this.view.weather.wind);
+    } catch {
+      // Nothing saved, or a private window: start at golden hour in clear skies.
+    }
+  }
+
+  /** Debug and settings: jump straight to a time of day and weather by name. */
+  setSky(time: string, weather?: string): void {
+    this.view.setSky(time, weather);
+    this.sound.setGusts(this.view.weather.wind);
+    this.saveSky();
+  }
+
+  private saveSky(): void {
+    try {
+      localStorage.setItem(SKY_KEY, JSON.stringify(this.view.skyName));
+    } catch {
+      // Private windows: the sky just isn't remembered.
+    }
   }
 
   start(): void {
@@ -133,7 +158,7 @@ export class Game {
     if (c === 'restart' || c === 'reset') this.walker = null;
     if (c === 'slopestyle' || c === 'treeRun') return this.startEvent(c);
     // Nothing but leaving (back to the top) while sitting on a chair.
-    if (this.chair && c !== 'restart' && c !== 'toggleTuning' && c !== 'cycleLight' && c !== 'toggleMute' && c !== 'swapSport') return;
+    if (this.chair && c !== 'restart' && c !== 'toggleTuning' && c !== 'cycleLight' && c !== 'cycleWeather' && c !== 'toggleMute' && c !== 'swapSport') return;
     if (c === 'restart') this.chair = null;
     if (this.event?.active && c === 'reset') return this.startEvent(this.event.def.id);
     if (this.event?.active && c === 'swapSport') return;
@@ -142,7 +167,11 @@ export class Game {
     else if (c === 'restart') restart(this.rider);
     else if (c === 'swapSport') swapSport(this.rider);
     else if (c === 'toggleTuning') this.tuning.toggle();
-    else if (c === 'cycleLight') this.view.cycleLight();
+    else if (c === 'cycleLight' || c === 'cycleWeather') {
+      this.say(c === 'cycleLight' ? this.view.cycleLight() : this.view.cycleWeather());
+      this.saveSky();
+      this.sound.setGusts(this.view.weather.wind);
+    }
     else if (c === 'toggleMute') this.sound.toggleMute();
     if (c === 'restart') this.view.clearTrails();
     if (c === 'reset' || c === 'restart') {
@@ -310,6 +339,7 @@ export class Game {
       jacket: JACKETS[this.jacket],
       dogs: this.dogs.map((d) => ({ name: d.name, x: d.x, z: d.z, following: d.follow > 0, happy: d.happy > 0 })),
       cheering: this.view.cheering,
+      sky: this.view.skyName,
       event: this.event && {
         id: this.event.def.id,
         phase: this.event.run.phase,
@@ -443,6 +473,7 @@ export class Game {
         charge: r.charge,
         // Sitting on a chair reads best as the crouched tuck.
         tucking: r.tucking || this.chair !== null,
+        push: r.pushing && r.grounded ? 1 - Math.max(0, r.skateTimer) / SPORTS[r.sport].pushInterval : null,
         braking: r.braking,
         skidding: r.skidding,
         grab: r.grab,

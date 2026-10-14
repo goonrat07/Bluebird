@@ -25,7 +25,7 @@ export interface Recording {
 
 /** Fingerprint of every tuning number, so a ghost recorded with different physics isn't replayed wrongly. */
 export function physicsVersion(): string {
-  const text = JSON.stringify({ SPORTS, SNOW, RIDE, AIR, ASSIST, CRASH, FLOW, GAP, RAIL, v: 1 });
+  const text = JSON.stringify({ SPORTS, SNOW, RIDE, AIR, ASSIST, CRASH, FLOW, GAP, RAIL, v: 2 });
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
   return (h >>> 0).toString(36);

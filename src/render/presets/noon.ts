@@ -17,5 +17,6 @@ export const noon: LightPreset = {
   fogDensity: 0.001,
   snow: 0xf2f2f2,
   exposure: 0.9,
+  lamps: 0,
   sparkle: 0.7,
 };

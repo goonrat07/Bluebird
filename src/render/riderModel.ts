@@ -22,6 +22,8 @@ export interface RiderPose {
   walk?: number | null;
   /** Walking speed (m/s), so the stride stops when you stand still. */
   walkSpeed?: number;
+  /** Pushing along (W when slow): 0..1 through the push, or null. */
+  push?: number | null;
 }
 
 /** How quickly the body catches up with the equipment (1/s). Lower = more weight and lag. */
@@ -60,6 +62,8 @@ export class RiderModel {
   private readonly legs: THREE.Mesh[] = [];
   private readonly board = box(0.3, 0.05, 1.55, 0x2a3a55);
   private readonly skis = new THREE.Group();
+  /** Ski poles, one in each hand. */
+  private readonly poles: THREE.Mesh[] = [];
   /** Gear over the shoulder while walking. */
   private readonly carried = new THREE.Group();
   private readonly carriedBoard = box(0.3, 1.55, 0.05, 0x2a3a55);
@@ -112,6 +116,14 @@ export class RiderModel {
       sleeve.material = this.jacketMat;
       sleeve.position.y = -0.28;
       arm.add(sleeve);
+      // A pole in the hand, basket end trailing down and back.
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.2, 5), new THREE.MeshStandardMaterial({ color: 0x3b4152, flatShading: true }));
+      pole.castShadow = true;
+      pole.geometry.translate(0, -0.6, 0);
+      pole.position.set(0, -0.58, 0.04);
+      pole.rotation.x = 0.45;
+      arm.add(pole);
+      this.poles.push(pole);
       this.torso.add(arm);
     }
 
@@ -165,6 +177,7 @@ export class RiderModel {
       this.sport = p.sport;
       this.board.visible = !this.walking && p.sport === 'board';
       this.skis.visible = !this.walking && p.sport === 'ski';
+      for (const pole of this.poles) pole.visible = !this.walking && p.sport === 'ski';
       // Snowboarders stand sideways to the board; skiers face forward (and everyone walks forward).
       this.stance.rotation.y = !this.walking && p.sport === 'board' ? -Math.PI / 2 : 0;
     }
@@ -177,6 +190,7 @@ export class RiderModel {
       this.board.visible = !walking && p.sport === 'board';
       this.skis.visible = !walking && p.sport === 'ski';
       this.carried.visible = walking;
+      for (const pole of this.poles) pole.visible = !walking && p.sport === 'ski';
       this.stance.rotation.y = !walking && p.sport === 'board' ? -Math.PI / 2 : 0;
     }
     if (walking) {
@@ -195,7 +209,7 @@ export class RiderModel {
       this.armRight.rotation.set(s * 0.8, 0, -0.12);
       return;
     }
-    for (const leg of this.legs) leg.rotation.x = 0;
+    for (const leg of this.legs) leg.rotation.x = leg.rotation.z = 0;
     this.armLeft.rotation.x = this.armRight.rotation.x = 0;
 
     if (p.crashed) {
@@ -235,6 +249,23 @@ export class RiderModel {
     this.armL = follow(this.armL, l, BODY.arms, dt);
     this.armR = follow(this.armR, r, BODY.arms, dt);
     this.setArms(this.armL, this.armR);
+    if (p.push !== null && p.push !== undefined && p.grounded) this.pushPose(p.sport, p.push);
+  }
+
+  /** Pushing along: a double-pole plant and drive on skis, a back-foot scoot on a board. */
+  private pushPose(sport: Sport, t: number): void {
+    // The drive is quick (first third), the recovery slower.
+    const drive = t < 0.35 ? t / 0.35 : 1 - (t - 0.35) / 0.65;
+    if (sport === 'ski') {
+      // Arms reach forward, plant, and drive back past the hips; the body crunches over them.
+      const swing = -1.1 + 1.8 * drive;
+      this.armLeft.rotation.x = this.armRight.rotation.x = swing;
+      this.setCrouch(0.15 + 0.35 * Math.sin(Math.min(1, t / 0.35) * Math.PI));
+    } else {
+      // Back foot out of the binding, kicking back along the board; the front knee bends with it.
+      this.legs[0].rotation.z = -0.7 * Math.sin(t * Math.PI);
+      this.setCrouch(0.2 + 0.15 * Math.sin(t * Math.PI));
+    }
   }
 
   /** 0 = standing tall, 1 = deep crouch. */

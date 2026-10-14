@@ -12,7 +12,9 @@ import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
 import { buildPark } from './park';
 import { Spray } from './spray';
-import { PRESETS, type LightPreset } from './presets';
+import { PRESETS, blendPresets, type LightPreset } from './presets';
+import { WEATHERS, Snowfall, withWeather, type Weather } from './weather';
+import { Lamps } from './lamps';
 import { Sky } from './sky';
 import { buildPeaks, tintPeaks } from './peaks';
 import { createSnowMaterial } from './snowMaterial';
@@ -87,6 +89,15 @@ export class SceneView {
   private camYaw = 0;
   private glade = 0;
   private presetIndex = 0;
+  private weatherIndex = 0;
+  private readonly snowfall = new Snowfall();
+  private readonly lamps = new Lamps();
+  /** The rider's headlamp, on after dark. */
+  private readonly headlamp = new THREE.SpotLight(0xfff1d8, 0, 45, 0.55, 0.5, 1.2);
+  /** The look on screen, and the one it is easing from toward the chosen time and weather. */
+  private look: LightPreset = PRESETS[0];
+  private lookFrom: LightPreset = PRESETS[0];
+  private lookBlend = 1;
   private time = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -109,20 +120,60 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.lifts.root, this.village.root, this.crowd.root, this.dogs.root, this.seat, this.rider.root, this.ghost.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.lifts.root, this.village.root, this.crowd.root, this.dogs.root, this.seat, this.rider.root, this.ghost.root, this.spray.points, this.snowfall.points, this.lamps.root);
+    // The headlamp sits on the helmet and looks a little way down the slope ahead.
+    this.headlamp.position.set(0, 1.9, 0.2);
+    this.headlamp.target.position.set(0, -1, 14);
+    this.rider.root.add(this.headlamp, this.headlamp.target);
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
-    this.applyPreset(PRESETS[0]);
+    this.applyPreset(this.targetLook());
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
 
-  /** Steps to the next time-of-day look (T key). */
+  /** Steps on to the next time of day (T key), easing into it. */
   cycleLight(): string {
     this.presetIndex = (this.presetIndex + 1) % PRESETS.length;
-    this.applyPreset(PRESETS[this.presetIndex]);
+    this.easeToLook();
     return PRESETS[this.presetIndex].name;
+  }
+
+  /** Steps on to the next weather (Y key), easing into it. */
+  cycleWeather(): string {
+    this.weatherIndex = (this.weatherIndex + 1) % WEATHERS.length;
+    this.easeToLook();
+    return WEATHERS[this.weatherIndex].name;
+  }
+
+  /** Jumps straight to a time of day and weather by name (play tests and saved settings). */
+  setSky(time: string, weather?: string): void {
+    const t = PRESETS.findIndex((p) => p.name === time);
+    const w = WEATHERS.findIndex((x) => x.name === weather);
+    if (t >= 0) this.presetIndex = t;
+    if (w >= 0) this.weatherIndex = w;
+    this.lookBlend = 1;
+    this.applyPreset(this.targetLook());
+  }
+
+  /** The chosen time of day and weather, e.g. "Night" and "Snowstorm". */
+  get skyName(): { time: string; weather: string } {
+    return { time: PRESETS[this.presetIndex].name, weather: WEATHERS[this.weatherIndex].name };
+  }
+
+  get weather(): Weather {
+    return WEATHERS[this.weatherIndex];
+  }
+
+  private targetLook(): LightPreset {
+    return withWeather(PRESETS[this.presetIndex], this.weather);
+  }
+
+  private easeToLook(): void {
+    this.lookFrom = this.look;
+    this.lookBlend = 0;
+    this.snowfall.set(this.weather);
   }
 
   clearTrails(): void {
@@ -130,6 +181,16 @@ export class SceneView {
   }
 
   private applyPreset(p: LightPreset): void {
+    this.look = p;
+    const w = this.weather;
+    this.snowfall.set(w);
+    this.post?.setFrost(w.frost);
+    this.lamps.setGlow(p.lamps);
+    this.village.setLamps(p.lamps);
+    // Switching a light on or off recompiles shaders, so the headlamp stays on and only its strength changes.
+    // Cloud softens shadows away to almost nothing.
+    this.sun.shadow.intensity = 1 - 0.9 * w.overcast;
+    this.headlamp.intensity = Math.max(0, p.lamps - 0.3) * 30;
     this.sunDir.set(
       Math.sin(p.sunAzimuth) * Math.cos(p.sunElevation),
       Math.sin(p.sunElevation),
@@ -146,7 +207,7 @@ export class SceneView {
     this.snow.material.color.set(p.snow);
     this.snow.setSparkle(p.sparkle);
     this.renderer.toneMappingExposure = p.exposure;
-    this.sky.apply(p, this.sunDir);
+    this.sky.apply(p, this.sunDir, Math.max(0, p.lamps * 2 - 1) * (1 - w.overcast));
     tintPeaks(this.peaks, p.fogColor);
   }
 
@@ -203,6 +264,15 @@ export class SceneView {
     this.spray.update(dt);
     this.updateCamera(v, dt, snap);
     this.sky.follow(this.camera);
+    if (this.lookBlend < 1) {
+      // Ease through a change of light over a couple of seconds.
+      this.lookBlend = Math.min(1, this.lookBlend + dt / 2);
+      const t = this.lookBlend * this.lookBlend * (3 - 2 * this.lookBlend);
+      const from = this.lookFrom;
+      this.applyPreset(blendPresets(from, this.targetLook(), t));
+      this.lookFrom = from;
+    }
+    this.snowfall.update(this.camera, dt);
     const at = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z);
     this.trails.update(at, v.heading, v.sport === 'board' ? 0.32 : 0.4, v.deepSnow, v.grounded && !v.grinding && !v.crashed && v.speed > 1);
 
