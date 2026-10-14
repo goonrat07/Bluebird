@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { RUNS, centerX, heightAt, kettleSurface, runAt } from '../../src/sim/terrain';
+import { BASE_AREA, RUNS, centerX, heightAt, kettleSurface, runAt } from '../../src/sim/terrain';
 
 describe('Kettle Peak', () => {
   it("leaves Kettle Run's snow exactly as it was", () => {
-    for (let z = 0; z <= 1700; z += 5) {
+    // Down to the finish; below it the base area levels out for the village.
+    for (let z = 0; z <= BASE_AREA.z0; z += 5) {
       for (let u = -36; u <= 36; u += 3) {
         const x = centerX(z) + u;
         expect(heightAt(x, z)).toBeCloseTo(kettleSurface(x, z), 9);

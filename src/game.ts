@@ -12,6 +12,17 @@ import { type Vec3, add, scale, sub } from './sim/vec';
 import { type LiftRide, boardLift, liftToBoard, stepLift, unloadRider } from './sim/lifts';
 import { TrailMap } from './ui/trailMap';
 import { heightAt } from './sim/terrain';
+import { type WalkState, startWalking, stepWalk } from './sim/walk';
+import { type Dog, createDogs, dogToPet, pet, stepDogs } from './sim/dogs';
+import { type Counter, counterAt, insideOf } from './sim/village';
+
+/** Jackets on the outfitters' rack; the first is the one you start in. */
+export const JACKETS = [0xe0563b, 0x2d6cc0, 0x2f8f5b, 0xe0b13b, 0x8b5bc4];
+const JACKET_KEY = 'bluebird.jacket';
+/** Landing a trick worth this much near people gets a cheer. */
+const CHEER_SCORE = 250;
+/** You can only step out of your bindings this slow. */
+const WALK_MAX_SPEED = 3;
 
 export interface Telemetry {
   frame: number;
@@ -42,6 +53,15 @@ export interface Telemetry {
   lift: { name: string; progress: number } | null;
   /** The lift you could get on right now with E. */
   canBoard: string | null;
+  /** What E would do right now, as shown on screen (lifts, dogs, shops). */
+  prompt: string;
+  /** On foot, and in which building. */
+  walking: boolean;
+  inside: string | null;
+  jacket: number;
+  dogs: { name: string; x: number; z: number; following: boolean; happy: boolean }[];
+  /** How many villagers are cheering right now. */
+  cheering: number;
   /** The event being ridden, if any. */
   event: {
     id: EventId;
@@ -77,10 +97,23 @@ export class Game {
   private event: EventSession | null = null;
   private ghostPrev: Vec3 | null = null;
   private chair: LiftRide | null = null;
+  private walker: WalkState | null = null;
+  private readonly dogs: Dog[] = createDogs();
+  private jacket = 0;
+  /** A short note after doing something (at a shop, with a dog); fades after a few seconds. */
+  private note = '';
+  private noteTime = 0;
+  private cheeredLandings = 0;
   private readonly map = new TrailMap();
 
   constructor(private readonly view: SceneView) {
     this.keyboard.onCommand((c) => this.command(c));
+    try {
+      this.jacket = Math.max(0, JACKETS.indexOf(Number(localStorage.getItem(JACKET_KEY) ?? JACKETS[0])));
+    } catch {
+      this.jacket = 0;
+    }
+    this.view.setJacket(JACKETS[this.jacket]);
   }
 
   start(): void {
@@ -93,14 +126,11 @@ export class Game {
   command(c: Command): void {
     // Events replay from their inputs alone, so mid-run only a fresh start or leaving is allowed.
     if (c === 'toggleMap') return this.map.toggle();
-    // Lifts are for getting around between rides, so not during an event.
-    if (c === 'lift') {
-      if (this.event?.active || this.chair) return;
-      const lift = liftToBoard(this.rider.pos, speedOf(this.rider));
-      if (lift) this.chair = boardLift(lift);
-      return;
-    }
-    if (c === 'slopestyle' || c === 'treeRun') this.chair = null;
+    // E: pet a dog, use a shop, or get on a lift. None of it during an event.
+    if (c === 'use') return this.use();
+    if (c === 'walk') return this.toggleWalk();
+    if (c === 'slopestyle' || c === 'treeRun') this.chair = this.walker = null;
+    if (c === 'restart' || c === 'reset') this.walker = null;
     if (c === 'slopestyle' || c === 'treeRun') return this.startEvent(c);
     // Nothing but leaving (back to the top) while sitting on a chair.
     if (this.chair && c !== 'restart' && c !== 'toggleTuning' && c !== 'cycleLight' && c !== 'toggleMute' && c !== 'swapSport') return;
@@ -123,6 +153,84 @@ export class Game {
     }
   }
 
+  /** What E does here and now: a dog first, then a shop counter (on foot), then a lift. */
+  private useTarget(): { label: string; act: () => void } | null {
+    if (this.event?.active || this.chair) return null;
+    const { x, z } = this.rider.pos;
+    const dog = dogToPet(this.dogs, x, z);
+    if (dog) return { label: `pet ${dog.name}`, act: () => this.petDog(dog) };
+    const counter = this.walker ? counterAt(x, z) : null;
+    if (counter) return { label: counter.label, act: () => this.useCounter(counter) };
+    const lift = liftToBoard(this.rider.pos, this.walker ? 0 : speedOf(this.rider));
+    if (lift) {
+      return {
+        label: `ride the ${lift.name}`,
+        act: () => {
+          // Clip back in to ride; you'll want your gear at the top.
+          if (this.walker) this.toggleWalk();
+          this.chair = boardLift(lift);
+        },
+      };
+    }
+    return null;
+  }
+
+  private use(): void {
+    this.useTarget()?.act();
+  }
+
+  private petDog(dog: Dog): void {
+    pet(dog);
+    this.say(dog.roams ? `${dog.name} wants to come along` : `${dog.name} leans into the scratch`);
+  }
+
+  private useCounter(c: Counter): void {
+    if (c.action === 'swapGear') {
+      swapSport(this.rider);
+      this.say(this.rider.sport === 'ski' ? 'Skis it is' : 'Back on the board');
+    } else if (c.action === 'outfit') {
+      this.jacket = (this.jacket + 1) % JACKETS.length;
+      this.view.setJacket(JACKETS[this.jacket]);
+      try {
+        localStorage.setItem(JACKET_KEY, String(JACKETS[this.jacket]));
+      } catch {
+        // Private windows: the jacket just isn't remembered.
+      }
+      this.say('Looking sharp');
+    } else {
+      this.say('Toasty');
+    }
+  }
+
+  private say(text: string): void {
+    this.note = text;
+    this.noteTime = 2.5;
+  }
+
+  /** B: step out of your bindings to walk, or clip back in where you stand. */
+  private toggleWalk(): void {
+    if (this.event?.active || this.chair) return;
+    const r = this.rider;
+    if (this.walker) {
+      const w = this.walker;
+      this.walker = null;
+      const fresh = createRider(r.sport, r.assist);
+      fresh.pos = { x: w.x, y: heightAt(w.x, w.z), z: w.z };
+      fresh.heading = w.heading;
+      fresh.safeSpots = [{ pos: { ...fresh.pos }, heading: w.heading }];
+      // Indoors you clip in at the door.
+      const inside = insideOf(w.x, w.z);
+      if (inside) {
+        fresh.pos = { x: inside.x, y: heightAt(inside.x, inside.z - inside.d / 2 - 1.5), z: inside.z - inside.d / 2 - 1.5 };
+        fresh.heading = Math.PI;
+      }
+      this.useRider(fresh);
+      return;
+    }
+    if (!r.grounded || r.crashed || speedOf(r) > WALK_MAX_SPEED) return;
+    this.walker = startWalking(r.pos.x, r.pos.z, r.heading);
+  }
+
   /** Starts (or restarts) an event: a fresh rider at its gate, a countdown, and a ghost to chase. */
   startEvent(id: EventId): void {
     this.event = new EventSession(EVENTS[id], this.rider.sport, this.rider.assist);
@@ -135,7 +243,7 @@ export class Game {
     const r = createRider(this.rider.sport, this.rider.assist);
     placeRider(r, z, u, speed, run);
     this.event = null;
-    this.chair = null;
+    this.chair = this.walker = null;
     this.useRider(r);
   }
 
@@ -145,7 +253,7 @@ export class Game {
     r.pos = { x, y: heightAt(x, z), z };
     r.safeSpots = [{ pos: { ...r.pos }, heading: 0 }];
     this.event = null;
-    this.chair = null;
+    this.chair = this.walker = null;
     this.useRider(r);
   }
 
@@ -196,6 +304,12 @@ export class Game {
       soundLevel: this.sound.level(),
       lift: this.chair && { name: this.chair.lift.name, progress: this.chair.s / this.chair.lift.length },
       canBoard: this.boardable(),
+      prompt: this.promptText(),
+      walking: this.walker !== null,
+      inside: this.walker ? (insideOf(this.walker.x, this.walker.z)?.id ?? null) : null,
+      jacket: JACKETS[this.jacket],
+      dogs: this.dogs.map((d) => ({ name: d.name, x: d.x, z: d.z, following: d.follow > 0, happy: d.happy > 0 })),
+      cheering: this.view.cheering,
       event: this.event && {
         id: this.event.def.id,
         phase: this.event.run.phase,
@@ -207,6 +321,16 @@ export class Game {
         ghostZ: this.event.ghost?.rider.pos.z ?? null,
       },
     };
+  }
+
+  /** The line under the screen: the lift you're on, a note, or what E would do here. */
+  private promptText(): string {
+    if (this.chair) return `${this.chair.lift.name} · ${Math.round((this.chair.s / this.chair.lift.length) * 100)}% · hold W to hurry`;
+    if (this.noteTime > 0) return this.note;
+    const target = this.useTarget();
+    if (target) return `<b>E</b> ${target.label}`;
+    if (this.walker) return '<b>B</b> clip back in';
+    return '';
   }
 
   private boardable(): string | null {
@@ -275,7 +399,14 @@ export class Game {
       const wasOnRail = this.rider.rail !== null;
       const popping = this.rider.jumpHeld && !input.jump;
       if (this.event?.ghost) this.ghostPrev = { ...this.event.ghost.rider.pos };
-      if (this.chair) {
+      if (this.walker) {
+        stepWalk(this.walker, input, STEP);
+        const w = this.walker;
+        this.rider.pos = { x: w.x, y: w.y, z: w.z };
+        this.rider.heading = w.heading;
+        this.rider.vel = { x: 0, y: 0, z: 0 };
+        this.rider.grounded = true;
+      } else if (this.chair) {
         if (stepLift(this.chair, this.rider, input.up, STEP)) {
           unloadRider(this.rider, this.chair.lift);
           this.chair = null;
@@ -284,6 +415,7 @@ export class Game {
       else stepRider(this.rider, input, STEP);
       if (!before && this.rider.grounded) landed = true;
       this.listen(before, wasOnRail, popping);
+      stepDogs(this.dogs, this.rider.pos, STEP);
       this.accumulator -= STEP;
     }
     const alpha = this.accumulator / STEP;
@@ -320,6 +452,9 @@ export class Game {
         flow: r.flow,
         grinding: r.rail !== null,
         chair: this.chair ? this.chair.lift.heading : null,
+        inside: this.walker ? (insideOf(this.walker.x, this.walker.z)?.id ?? null) : null,
+        walk: this.walker ? this.walker.phase : null,
+        walkSpeed: this.walker ? Math.abs(this.walker.speed) : 0,
       },
       dt,
       this.snapCamera,
@@ -329,7 +464,14 @@ export class Game {
     this.hud.updateFlow(dt, r.flow, r.branchHits);
     this.hud.updateBalance(dt, r.rail?.balance ?? null);
     this.hud.updateEvent(this.event);
-    this.hud.updateLift(this.chair && { name: this.chair.lift.name, progress: this.chair.s / this.chair.lift.length }, this.boardable());
+    this.noteTime = Math.max(0, this.noteTime - dt);
+    this.hud.updatePrompt(this.promptText());
+    this.view.renderDogs(this.dogs, dt);
+    // A big landing near people gets a cheer.
+    if (r.landings !== this.cheeredLandings) {
+      this.cheeredLandings = r.landings;
+      if (r.lastTrick && r.lastTrick.name !== 'Bail' && r.lastTrick.score >= CHEER_SCORE) this.view.cheer(r.pos.x, r.pos.z);
+    }
     this.map.update(r.pos, r.heading, this.chair?.lift.id ?? null);
     this.renderGhost(alpha, dt);
     this.sound.update({

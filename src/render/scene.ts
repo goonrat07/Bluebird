@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { RUN, centerX, heightAt, inGlade } from '../sim/terrain';
 import { buildMountain } from './mountain';
 import { LIFT } from '../sim/lifts';
+import { VillageView } from './village';
+import { CrowdView } from './crowd';
+import { DogsView } from './dogs';
+import type { Dog } from '../sim/dogs';
 import { LiftsView, chairGeometry, chairMaterial } from './lifts';
 import { TREES, type Tree, treeBaseY } from '../sim/trees';
 import type { Vec3 } from '../sim/vec';
@@ -21,6 +25,8 @@ export interface FrameView extends RiderPose {
   skidding: boolean;
   /** Heading of the chairlift the rider is sitting on, or null. */
   chair: number | null;
+  /** The building you're standing in on foot, if any. */
+  inside: string | null;
   /** True on the frame the rider touched down. */
   justLanded: boolean;
   /** Riding through powder, where tracks are deeper. */
@@ -45,6 +51,11 @@ export const CAMERA = {
   gladeHeight: 4,
   gladeDistance: 5.5,
   gladeLookAhead: 5,
+  /** On foot, and indoors. */
+  walkDistance: 4.5,
+  walkHeight: 2.8,
+  insideDistance: 2.6,
+  insideHeight: 5,
 };
 
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -57,6 +68,9 @@ export class SceneView {
   private readonly rider = new RiderModel();
   private readonly ghost = new RiderModel();
   private readonly lifts = new LiftsView();
+  private readonly village = new VillageView();
+  private readonly crowd = new CrowdView();
+  private readonly dogs = new DogsView();
   /** The chair under the player while they ride a lift. */
   private readonly seat = new THREE.Mesh(chairGeometry(), chairMaterial());
   private readonly spray = new Spray();
@@ -95,7 +109,7 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.lifts.root, this.seat, this.rider.root, this.ghost.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.lifts.root, this.village.root, this.crowd.root, this.dogs.root, this.seat, this.rider.root, this.ghost.root, this.spray.points);
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
@@ -156,8 +170,27 @@ export class SceneView {
   /** Draws one frame. `snap` jumps the camera into place instead of easing (used after a reset). */
   private readonly forest = buildTrees();
 
+  /** The crowd near (x, z) cheers. */
+  cheer(x: number, z: number): void {
+    this.crowd.cheer(x, z);
+  }
+
+  get cheering(): number {
+    return this.crowd.cheering;
+  }
+
+  renderDogs(dogs: Dog[], dt: number): void {
+    this.dogs.update(dogs, dt);
+  }
+
+  setJacket(color: number): void {
+    this.rider.setJacket(color);
+  }
+
   render(v: FrameView, dt: number, snap = false): void {
     this.lifts.update(dt);
+    this.crowd.update(dt);
+    this.village.showInside(v.inside);
     // Seated on a chair: its seat is just under the rider, its grip a hang above that.
     this.seat.visible = v.chair !== null;
     if (v.chair !== null) {
@@ -197,7 +230,8 @@ export class SceneView {
     // Follow the direction of travel, not the way the rider faces, so spins don't whip the camera around.
     const hSpeed = Math.hypot(v.vel.x, v.vel.z);
     // On a chair, look up the line with the rider.
-    const travelYaw = v.chair !== null ? v.chair : hSpeed > 1.5 ? Math.atan2(v.vel.x, v.vel.z) : this.camYaw;
+    const onFoot = v.walk !== undefined && v.walk !== null;
+    const travelYaw = v.chair !== null ? v.chair : onFoot ? v.heading : hSpeed > 1.5 ? Math.atan2(v.vel.x, v.vel.z) : this.camYaw;
     const k = snap ? 1 : 1 - Math.exp(-4 * dt);
     this.camYaw = snap ? v.heading : lerpAngle(this.camYaw, travelYaw, k);
 
@@ -206,9 +240,13 @@ export class SceneView {
     const gladeTarget = inGlade(v.pos.x, v.pos.z) ? 1 : 0;
     this.glade = snap ? gladeTarget : this.glade + (gladeTarget - this.glade) * (1 - Math.exp(-1.5 * dt));
     const g = this.glade;
-    const distance =
-      CAMERA.distance + (CAMERA.gladeDistance - CAMERA.distance) * g + Math.min(CAMERA.speedDistanceMax, v.speed * CAMERA.speedDistance);
-    const height = CAMERA.height + (CAMERA.gladeHeight - CAMERA.height) * g;
+    // On foot the camera comes in close; indoors it looks down into the room with the roof off.
+    const distance = onFoot
+      ? v.inside
+        ? CAMERA.insideDistance
+        : CAMERA.walkDistance
+      : CAMERA.distance + (CAMERA.gladeDistance - CAMERA.distance) * g + Math.min(CAMERA.speedDistanceMax, v.speed * CAMERA.speedDistance);
+    const height = onFoot ? (v.inside ? CAMERA.insideHeight : CAMERA.walkHeight) : CAMERA.height + (CAMERA.gladeHeight - CAMERA.height) * g;
     const lookAhead = CAMERA.lookAhead + (CAMERA.gladeLookAhead - CAMERA.lookAhead) * g;
     const desired = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z).addScaledVector(back, distance);
     desired.y = Math.max(v.pos.y + height, heightAt(desired.x, desired.z) + 2);

@@ -1,6 +1,7 @@
 import { AIR, ASSIST, CRASH, FLOW, GAP, RAIL, RIDE, SNOW, SPORTS, WORLD, type AssistLevel, type SnowType, type Sport } from './tuning';
 import { START, heightAt, isNearLip, normalAt, snowAt } from './terrain';
 import { TRUNK_RADIUS, treesNear, treesWithin } from './trees';
+import { pushOutOfWalls } from './village';
 import { RAILS, railOffset, railPoint } from './rails';
 import { type AirLog, type GrabDir, type LandingQuality, type Trick, grabName, joinTricks, scoreGrind, scoreTrick } from './tricks';
 import type { RideInput } from './input';
@@ -155,6 +156,7 @@ export function stepRider(r: RiderState, input: RideInput, dt: number): void {
   r.pos = add(r.pos, scale(r.vel, dt));
   if (!r.crashed && lockOnRail(r, prevY)) return;
   collideTrees(r);
+  collideWalls(r);
   updateFlow(r, dt);
   resolveGround(r);
 }
@@ -388,6 +390,18 @@ function resolveGround(r: RiderState): void {
     if (r.crashed) r.grounded = false;
     else takeOff(r);
   }
+}
+
+/** Buildings stop you like a big tree does: crash if you hit hard, slide along the wall if you glance it. */
+function collideWalls(r: RiderState): void {
+  const hit = pushOutOfWalls(r.pos.x, r.pos.z, CRASH.riderRadius);
+  if (!hit) return;
+  r.pos = vec(hit.x, r.pos.y, hit.z);
+  const away = vec(hit.nx, 0, hit.nz);
+  const into = -dot(r.vel, away);
+  if (into <= 0) return;
+  if (!r.crashed && into > CRASH.treeCrashSpeed) crash(r);
+  r.vel = scale(add(r.vel, scale(away, into)), r.crashed ? 0.3 : CRASH.glanceKeep);
 }
 
 function collideTrees(r: RiderState): void {

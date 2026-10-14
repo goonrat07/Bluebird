@@ -58,13 +58,8 @@ export class Hud {
     this.balance.classList.toggle('danger', Math.abs(balance) > 0.7);
   }
 
-  /** A quiet line near the bottom: what E would do here, or the lift you're riding. */
-  updateLift(riding: { name: string; progress: number } | null, canBoard: string | null): void {
-    const text = riding
-      ? `${riding.name} · ${Math.round(riding.progress * 100)}% · hold W to hurry`
-      : canBoard
-        ? `<b>E</b> ride the ${canBoard}`
-        : '';
+  /** A quiet line under the middle of the screen: what E would do here, a note, or the lift you're on. */
+  updatePrompt(text: string): void {
     if (text === this.promptKey) return;
     this.promptKey = text;
     this.prompt.innerHTML = text;

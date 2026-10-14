@@ -37,7 +37,8 @@ export type Command =
   | 'toggleMute'
   | 'slopestyle'
   | 'treeRun'
-  | 'lift'
+  | 'use'
+  | 'walk'
   | 'toggleMap';
 
 const COMMANDS: Record<string, Command> = {
@@ -49,7 +50,8 @@ const COMMANDS: Record<string, Command> = {
   KeyM: 'toggleMute',
   Digit1: 'slopestyle',
   Digit2: 'treeRun',
-  KeyE: 'lift',
+  KeyE: 'use',
+  KeyB: 'walk',
   Tab: 'toggleMap',
 };
 

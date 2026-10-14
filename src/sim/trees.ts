@@ -1,5 +1,6 @@
-import { CAT_TRACKS, MOUNTAIN_BOUNDS, RUN, RUNS, centerX, heightAt, lateral, nearTrack, normalAt } from './terrain';
+import { BASE_AREA, CAT_TRACKS, MOUNTAIN_BOUNDS, RUN, RUNS, centerX, heightAt, lateral, nearTrack, normalAt } from './terrain';
 import { LIFTS } from './lifts';
+import { BUILDINGS } from './village';
 
 export interface Tree {
   /** Index in TREES. */
@@ -74,8 +75,14 @@ function generate(): Tree[] {
     const nearStation = Math.min(Math.hypot(dx, dz), Math.hypot(t.x - l.top[0], t.z - l.top[1]), Math.hypot(t.x - l.unload[0], t.z - l.unload[1]));
     return nearStation < FOREST.stationClearing || (s > 0 && s < l.length && across < FOREST.liftClearing);
   }));
-  clear.forEach((t, i) => (t.id = i));
-  return clear;
+  // And the village: the base apron is open, apart from a few trees left standing at its edges.
+  const village = clear.filter(
+    (t) =>
+      !(t.z > BASE_AREA.z0 + 10 && Math.abs(t.x - BASE_AREA.centerX) < BASE_AREA.halfWidth - 30) &&
+      !BUILDINGS.some((b) => Math.abs(t.x - b.x) < b.w / 2 + 5 && Math.abs(t.z - b.z) < b.d / 2 + 5),
+  );
+  village.forEach((t, i) => (t.id = i));
+  return village;
 }
 
 /** The forest beyond Kettle Run's banks. */
