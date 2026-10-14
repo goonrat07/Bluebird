@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Sport } from '../sim/tuning';
 import { SPORTS } from '../sim/tuning';
-import { PALETTE, capsule, hanging, rounded, toon, toonOwn } from './toon';
+import { PALETTE, addOutlines, capsule, hanging, rounded, toon, toonOwn } from './toon';
 
 /** What the renderer needs to pose the rider for one frame. */
 export interface RiderPose {
@@ -60,8 +60,7 @@ const part = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 
 };
 const box = (w: number, h: number, d: number, color: number): THREE.Mesh => part(new THREE.BoxGeometry(w, h, d), toon(color));
 
-// A soft storybook rider: rounded limbs, a puffy jacket, a big round head with dot eyes and rosy cheeks,
-// goggles pushed up on the helmet. Nested groups do the posing:
+// A storybook rider in the Tiny Bookshop manner: slim and naturally proportioned, flat colour, ink outline. Nested groups do the posing:
 // yaw (heading) -> flip (pitch) -> lean (edge) -> stance (sideways for a board) -> body parts.
 export class RiderModel {
   readonly root = new THREE.Group();
@@ -105,48 +104,41 @@ export class RiderModel {
     this.stance.add(this.hips);
 
     // Legs are centred capsules 0.8 m long, so the crouch can squash them about their middle.
-    const legGeo = capsule(0.1, 0.8).translate(0, -0.4, 0);
+    const legGeo = capsule(0.075, 0.8).translate(0, -0.4, 0);
     for (const side of [-1, 1]) {
-      const leg = part(legGeo, toon(PALETTE.denim), side * 0.13, 0.4, 0);
+      const leg = part(legGeo, toon(PALETTE.denim), side * 0.1, 0.4, 0);
       this.legs.push(leg);
       this.hips.add(leg);
-      this.hips.add(part(rounded(0.17, 0.14, 0.3), toon(PALETTE.ink), side * 0.13, 0.07, 0.03));
+      this.hips.add(part(rounded(0.13, 0.12, 0.27), toon(PALETTE.ink), side * 0.1, 0.06, 0.03));
     }
     this.torso.position.y = 0.8;
     this.hips.add(this.torso);
-    // A puffy bean of a jacket with a contrasting hem and a scarf.
+    // A slim, natural figure about seven heads tall: a long jacket over the hips, a scarf, a small head
+    // with hair showing under the helmet and goggles pushed up. No face details; colour and shape carry it.
     this.jacketMat = toonOwn(jacket);
-    const chest = part(capsule(0.25, 0.7, 12).scale(1, 1, 0.8), this.jacketMat, 0, -0.04, 0);
-    const hem = part(new THREE.TorusGeometry(0.235, 0.045, 6, 16).rotateX(Math.PI / 2).scale(1, 1, 0.82), toon(PALETTE.oat), 0, 0.05, 0);
-    const scarf = part(new THREE.TorusGeometry(0.13, 0.055, 6, 14).rotateX(Math.PI / 2), toon(PALETTE.mustard), 0, 0.62, 0);
-    // A big round head (about a quarter of the height) with dot eyes and blush.
-    const head = part(new THREE.SphereGeometry(0.22, 16, 12).scale(1, 0.95, 1), toon(PALETTE.skinLight), 0, 0.86, 0);
-    const eyeGeo = new THREE.SphereGeometry(0.024, 8, 6).scale(1, 1.3, 0.6);
-    const cheekGeo = new THREE.CircleGeometry(0.038, 12);
-    for (const side of [-1, 1]) {
-      head.add(part(eyeGeo, toon(PALETTE.ink), side * 0.078, 0.0, 0.205));
-      const cheek = part(cheekGeo, toon(PALETTE.blush), side * 0.125, -0.06, 0.18);
-      cheek.rotation.y = side * 0.55;
-      cheek.castShadow = false;
-      head.add(cheek);
-    }
-    // Helmet over the top of the head, goggles pushed up on its brow.
-    const helmet = part(new THREE.SphereGeometry(0.235, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), toon(PALETTE.pine), 0, 0.9, -0.01);
-    const goggles = part(rounded(0.3, 0.095, 0.08), toon(PALETTE.ink), 0, 1.06, 0.15);
-    goggles.rotation.x = -0.55;
-    const lens = part(rounded(0.25, 0.065, 0.02), toon(0x8fc3c8), 0, 1.063, 0.19);
-    lens.rotation.x = -0.55;
-    this.torso.add(chest, hem, scarf, head, helmet, goggles, lens);
+    const chest = part(capsule(0.17, 0.64, 12).scale(1, 1, 0.72), this.jacketMat, 0, -0.1, 0);
+    const scarf = part(new THREE.TorusGeometry(0.075, 0.035, 6, 14).rotateX(Math.PI / 2), toon(PALETTE.mustard), 0, 0.53, 0.005);
+    const neck = part(capsule(0.045, 0.12), toon(PALETTE.skinLight), 0, 0.52, 0);
+    const head = part(new THREE.SphereGeometry(0.11, 16, 12).scale(0.95, 1.08, 1), toon(PALETTE.skinLight), 0, 0.69, 0.005);
+    const hair = part(new THREE.SphereGeometry(0.1, 12, 8).scale(1.2, 0.85, 0.75), toon(PALETTE.hairBrown), 0, 0.655, -0.055);
+    const helmet = part(new THREE.SphereGeometry(0.125, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), toon(PALETTE.pine), 0, 0.705, -0.005);
+    const goggles = part(rounded(0.17, 0.055, 0.05), toon(PALETTE.ink), 0, 0.79, 0.075);
+    goggles.rotation.x = -0.6;
+    const lens = part(rounded(0.14, 0.036, 0.014), toon(0x8fc3c8), 0, 0.792, 0.097);
+    lens.rotation.x = -0.6;
+    lens.userData.noOutline = true;
+    this.torso.add(chest, scarf, neck, head, hair, helmet, goggles, lens);
     for (const [arm, side] of [[this.armLeft, 1], [this.armRight, -1]] as const) {
-      arm.position.set(side * 0.3, 0.52, 0);
-      const sleeve = part(hanging(0.08, 0.52), this.jacketMat);
+      arm.position.set(side * 0.2, 0.46, 0);
+      const sleeve = part(hanging(0.055, 0.5), this.jacketMat);
       arm.add(sleeve);
-      arm.add(part(new THREE.SphereGeometry(0.075, 10, 8), toon(PALETTE.mustard), 0, -0.55, 0));
+      arm.add(part(new THREE.SphereGeometry(0.05, 10, 8), toon(PALETTE.mustard), 0, -0.52, 0));
       // A pole in the hand, basket end trailing down and back.
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.2, 5), toon(PALETTE.ink));
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1.2, 5), toon(PALETTE.ink));
       pole.castShadow = true;
+      pole.userData.noOutline = true;
       pole.geometry.translate(0, -0.6, 0);
-      pole.position.set(0, -0.58, 0.04);
+      pole.position.set(0, -0.54, 0.03);
       pole.rotation.x = 0.45;
       arm.add(pole);
       this.poles.push(pole);
@@ -162,17 +154,18 @@ export class RiderModel {
     this.lean.add(this.board, this.skis);
 
     // Board slung on the back; skis together over the right shoulder.
-    this.carriedBoard.position.set(0, 0.35, -0.2);
+    this.carriedBoard.position.set(0, 0.3, -0.15);
     this.carriedBoard.rotation.z = 0.5;
     for (const side of [-1, 1]) {
       const ski = box(0.08, 0.04, 1.75, PALETTE.plum);
-      ski.position.set(-0.28 + side * 0.05, 0.66, 0.05);
+      ski.position.set(-0.2 + side * 0.05, 0.6, 0.03);
       ski.rotation.x = -0.35;
       this.carriedSkis.add(ski);
     }
     this.carried.add(this.carriedBoard, this.carriedSkis);
     this.carried.visible = false;
     this.torso.add(this.carried);
+    addOutlines(this.root);
   }
 
   /** Jacket colour from the outfitters. */
@@ -191,7 +184,8 @@ export class RiderModel {
       depthWrite: false,
     });
     this.root.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
+      if (o.userData.outline) o.visible = false;
+      else if (o instanceof THREE.Mesh) {
         o.material = ghost;
         o.castShadow = false;
       }

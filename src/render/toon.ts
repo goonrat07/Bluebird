@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
-// Soft storybook shading for people and dogs: three close tone steps, so shadows are gentle and
-// tinted by the sky light rather than dark. Shapes are rounded (capsules, spheres), no textures.
+// Storybook people and dogs, after Tiny Bookshop: slim, naturally proportioned figures in flat colour
+// with a soft shade step and a thin hand-drawn outline. Shapes are rounded (capsules, spheres), no textures.
 
 /** The character palette: dusty pastels that read as the brightest things on cream and lavender snow. */
 export const PALETTE = {
@@ -18,13 +18,19 @@ export const PALETTE = {
   skinMid: 0xc98e6a,
   skinDeep: 0xa86f4c,
   ink: 0x3b3350,
+  sky: 0x8fb8d8,
+  coral: 0xf08a6c,
+  hairDark: 0x3a2a24,
+  hairBrown: 0x7a4a2c,
+  hairGinger: 0xc4683a,
+  hairBlond: 0xe0b870,
 };
 
 let ramp: THREE.DataTexture | null = null;
-/** A three-step light ramp with the steps close together (soft, low-contrast shade). */
+/** A light ramp with the steps close together and the shade light (flat, airy colour). */
 function gradient(): THREE.DataTexture {
   if (ramp) return ramp;
-  ramp = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 205, 205, 205, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat);
+  ramp = new THREE.DataTexture(new Uint8Array([178, 178, 178, 255, 225, 225, 225, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat);
   ramp.minFilter = ramp.magFilter = THREE.NearestFilter;
   ramp.needsUpdate = true;
   return ramp;
@@ -67,4 +73,49 @@ export function rounded(w: number, h: number, d: number, radial = 8): THREE.Buff
   else if (long === d) g.rotateX(Math.PI / 2).scale(w / (2 * r), h / (2 * r), 1);
   else g.scale(w / (2 * r), 1, d / (2 * r));
   return g;
+}
+
+/** The outline colour: a warm dark brown-violet, like an ink line. */
+const LINE = 0x4a3a40;
+const lines = new Map<number, THREE.MeshBasicMaterial>();
+/** A back-face shell pushed out along the normals by `width` metres: an inverted-hull outline. */
+export function outlineMaterial(width = 0.012): THREE.MeshBasicMaterial {
+  let m = lines.get(width);
+  if (!m) {
+    m = new THREE.MeshBasicMaterial({ color: LINE, side: THREE.BackSide });
+    m.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `vec3 transformed = position + normalize(normal) * ${width.toFixed(4)};`,
+      );
+    };
+    m.customProgramCacheKey = () => `outline${width}`;
+    lines.set(width, m);
+  }
+  return m;
+}
+
+/** Gives every mesh under `root` an ink outline (meshes marked userData.noOutline are skipped). */
+export function addOutlines(root: THREE.Object3D, width = 0.012): void {
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if (o instanceof THREE.Mesh && !o.userData.noOutline && !o.userData.outline) meshes.push(o);
+  });
+  for (const m of meshes) {
+    const line = m instanceof THREE.InstancedMesh ? outlinedInstances(m, width) : new THREE.Mesh(m.geometry, outlineMaterial(width));
+    line.userData.outline = true;
+    line.castShadow = false;
+    if (!(m instanceof THREE.InstancedMesh)) m.add(line);
+  }
+}
+
+/** An outline for an instanced mesh, sharing its instance matrices (added beside it). */
+export function outlinedInstances(m: THREE.InstancedMesh, width = 0.012): THREE.InstancedMesh {
+  const line = new THREE.InstancedMesh(m.geometry, outlineMaterial(width), m.count);
+  line.instanceMatrix = m.instanceMatrix;
+  line.userData.outline = true;
+  line.castShadow = false;
+  line.frustumCulled = false;
+  m.parent?.add(line);
+  return line;
 }

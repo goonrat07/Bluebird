@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Dog } from '../sim/dogs';
-import { PALETTE, rounded, toon } from './toon';
+import { PALETTE, addOutlines, rounded, toon } from './toon';
 
 // Two soft round dogs: Bowie in his red patrol vest, and scruffy Pepper.
 
@@ -44,6 +44,7 @@ export class DogModel {
       this.legs.push(leg);
       this.root.add(leg);
     }
+    addOutlines(this.root);
   }
 
   update(d: Dog, dt: number): void {

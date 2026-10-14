@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { RiderModel, type RiderPose } from './render/riderModel';
 import { DogModel } from './render/dogs';
-import { PERSON } from './render/crowd';
-import { PALETTE, toon } from './render/toon';
+import { HIPS, PERSON, villagerLook } from './render/crowd';
+import { PALETTE, addOutlines, toon } from './render/toon';
 import { golden } from './render/presets/golden';
 
 // A dev-only character sheet (npm run dev, then /characters.html): everyone front-on in golden-hour
@@ -45,17 +45,17 @@ add(-2.6, 'board', null);
 add(-1.3, 'ski', null, PALETTE.denim);
 add(0, 'board', 0, PALETTE.mustard);
 
-// Villagers built from the same parts the instanced crowd uses.
-const villager = (x: number, jacket: number, skin: number, hat: number) => {
+// Villagers built from the same parts the instanced crowd uses, one of each hair and hat.
+const villager = (x: number, i: number) => {
+  const look = villagerLook(i);
   const g = new THREE.Group();
   const parts: [THREE.BufferGeometry, number, number][] = [
-    [PERSON.legsStand(), PALETTE.denim, 0],
-    [PERSON.torso(), jacket, 0.8],
-    [PERSON.armsDown(), jacket, 0.8],
-    [PERSON.head(), skin, 0.8],
-    [PERSON.hat(), hat, 0.8],
-    [PERSON.eyes(), PALETTE.ink, 0.8],
-    [PERSON.cheeks(), PALETTE.blush, 0.8],
+    [PERSON.legsStand(), look.pants, 0],
+    [PERSON.shoesStand(), PALETTE.ink, 0],
+    [PERSON.torso(), look.jacket, HIPS.stand],
+    [PERSON.armsDown(), look.jacket, HIPS.stand],
+    [PERSON.head(), look.skin, HIPS.stand],
+    [PERSON.top(look.top), look.topColor, HIPS.stand],
   ];
   for (const [geo, color, y] of parts) {
     const m = new THREE.Mesh(geo, toon(color));
@@ -63,17 +63,16 @@ const villager = (x: number, jacket: number, skin: number, hat: number) => {
     m.castShadow = true;
     g.add(m);
   }
+  addOutlines(g);
   g.position.x = x;
   scene.add(g);
 };
-villager(1.3, PALETTE.raspberry, PALETTE.skinMid, PALETTE.oat);
-villager(2.4, PALETTE.sage, PALETTE.skinDeep, PALETTE.mustard);
-villager(3.4, PALETTE.plum, PALETTE.skinLight, PALETTE.terracotta);
+[0, 1, 2, 3, 4].forEach((k) => villager(0.9 + k * 0.7, [3, 4, 0, 1, 2][k]));
 
 const dogs = ['Bowie', 'Pepper'].map((name, i) => {
   const d = new DogModel(name);
   scene.add(d.root);
-  return { d, x: -3.6 + i * 7.9 };
+  return { d, x: -3.6 + i * 8.3 };
 });
 
 function frame(): void {
