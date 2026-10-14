@@ -17,7 +17,7 @@ import { type Dog, createDogs, dogToPet, pet, stepDogs } from './sim/dogs';
 import { type Counter, counterAt, insideOf } from './sim/village';
 
 /** Jackets on the outfitters' rack; the first is the one you start in. */
-export const JACKETS = [0xe0563b, 0x2d6cc0, 0x2f8f5b, 0xe0b13b, 0x8b5bc4];
+export const JACKETS = [0xe2725b, 0x3e5c8a, 0x4f8f7a, 0xf2b544, 0xd9637e];
 const JACKET_KEY = 'bluebird.jacket';
 const SKY_KEY = 'bluebird.sky';
 /** Landing a trick worth this much near people gets a cheer. */

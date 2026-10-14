@@ -31,6 +31,8 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `src/render/presets/` – time-of-day light presets (T steps through the day, easing between them).
   `src/render/weather.ts` lays clear, flat light or snowstorm over any of them (Y), plus the falling snow;
   `src/render/lamps.ts` lights Kettle Run and the village after dark. Purely visual: the sim never sees the sky.
+- `src/render/toon.ts` – the character look (rounded shapes, toon shading, warm palette). Rider, villagers and dogs all use it.
+  With `npm run dev`, `/characters.html` shows all of them side by side in one light.
 - `src/sim/rails.ts` – park rails and boxes; grinding lives in `rider.ts`.
 - `src/sim/events.ts` – events (start, finish, scoring, medals); `src/sim/replay.ts` records rides as one input mask per step.
   Ghosts replay those inputs, so anything that changes a ride must go through `RideInput`, never a side command.

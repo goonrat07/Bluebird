@@ -1,21 +1,22 @@
 import * as THREE from 'three';
 import type { Dog } from '../sim/dogs';
+import { PALETTE, addOutlines, rounded, toon } from './toon';
 
-// Two chunky low-poly dogs: Bowie in his red patrol vest, and scruffy Pepper.
+// Two soft round dogs: Bowie in his red patrol vest, and scruffy Pepper.
 
 const LOOK: Record<string, { coat: number; ears: number; vest: number | null }> = {
-  Bowie: { coat: 0xd9a35a, ears: 0xa8703a, vest: 0xd9553a },
+  Bowie: { coat: 0xd9a35a, ears: 0xa8703a, vest: PALETTE.terracotta },
   Pepper: { coat: 0x8a8278, ears: 0x5a4f46, vest: null },
 };
 
 const box = (w: number, h: number, d: number, color: number, x = 0, y = 0, z = 0): THREE.Mesh => {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.95 }));
+  const m = new THREE.Mesh(rounded(w, h, d), toon(color));
   m.position.set(x, y, z);
   m.castShadow = true;
   return m;
 };
 
-class DogModel {
+export class DogModel {
   readonly root = new THREE.Group();
   private readonly tail = new THREE.Group();
   private readonly head = new THREE.Group();
@@ -28,7 +29,9 @@ class DogModel {
     this.root.add(box(0.36, 0.34, 0.8, look.coat, 0, 0.55, 0));
     if (look.vest) this.root.add(box(0.4, 0.22, 0.42, look.vest, 0, 0.66, 0.05));
     this.head.position.set(0, 0.78, 0.42);
-    this.head.add(box(0.3, 0.28, 0.3, look.coat), box(0.16, 0.13, 0.2, look.coat, 0, -0.06, 0.22), box(0.07, 0.06, 0.05, 0x2b2b38, 0, -0.02, 0.33));
+    this.head.add(box(0.3, 0.28, 0.3, look.coat), box(0.16, 0.13, 0.2, look.coat, 0, -0.06, 0.22), box(0.08, 0.06, 0.05, PALETTE.ink, 0, -0.02, 0.33));
+    // Dot eyes.
+    for (const s of [-1, 1]) this.head.add(box(0.045, 0.05, 0.03, PALETTE.ink, s * 0.08, 0.05, 0.15));
     for (const s of [-1, 1]) this.head.add(box(0.08, 0.16, 0.06, look.ears, s * 0.14, 0.06, -0.04));
     this.root.add(this.head);
     this.tail.position.set(0, 0.66, -0.4);
@@ -41,6 +44,7 @@ class DogModel {
       this.legs.push(leg);
       this.root.add(leg);
     }
+    addOutlines(this.root);
   }
 
   update(d: Dog, dt: number): void {
