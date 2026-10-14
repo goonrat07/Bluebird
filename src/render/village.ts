@@ -106,9 +106,11 @@ function buildBuilding(b: Building): { group: THREE.Group; view: BuildingView } 
   }
   // Pitched roof, ridge running across the hill.
   const roofH = Math.min(3.2, b.d * 0.35);
-  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, (b.d / 2 + 0.6) * Math.SQRT2, roofH, 4, 1), ROOF_MAT[b.id]);
-  roof.rotation.y = Math.PI / 4;
-  roof.scale.set(((b.w + 1.2) / (b.d + 1.2)) * 1, 1, 1);
+  // A four-sided cone turned square to the walls, then stretched to the building: eaves 0.6 m out all round.
+  const roofGeo = new THREE.CylinderGeometry(0.01, (b.d / 2 + 0.6) * Math.SQRT2, roofH, 4, 1);
+  roofGeo.rotateY(Math.PI / 4);
+  const roof = new THREE.Mesh(roofGeo, ROOF_MAT[b.id]);
+  roof.scale.set((b.w + 1.2) / (b.d + 1.2), 1, 1);
   roof.position.set(b.x, y + b.height + roofH / 2, b.z);
   roof.castShadow = true;
   lid.add(roof);
@@ -119,7 +121,9 @@ function buildBuilding(b: Building): { group: THREE.Group; view: BuildingView } 
     lid.add(mesh(winGeo, MAT.window, wx, y + b.height - 1.1, b.z - b.d / 2 - 0.17));
   }
   const s = sign(b.name, Math.min(b.w * 0.8, 9));
-  s.position.set(b.x, y + b.height + 0.1, b.z - b.d / 2 - 0.35);
+  // Hung out past the eave (0.6 m) and above the windows, so the roof never cuts through it.
+  const signH = Math.min(b.w * 0.8, 9) * (96 / 512);
+  s.position.set(b.x, y + b.height - 0.35 + signH / 2, b.z - b.d / 2 - 0.85);
   s.rotation.y = Math.PI; // faces uphill, toward riders coming down
   lid.add(s);
   g.add(lid);
@@ -232,6 +236,11 @@ export class VillageView {
     });
     this.root.add(inside, tables(), pondAndParking());
     this.showInside(null);
+  }
+
+  /** Windows glow brighter as the light goes. */
+  setLamps(l: number): void {
+    (MAT.window as THREE.MeshStandardMaterial).emissiveIntensity = 0.55 + 1.8 * l;
   }
 
   /** Lifts the lid off whichever building you're standing in. */

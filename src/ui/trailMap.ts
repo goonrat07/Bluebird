@@ -45,7 +45,11 @@ export class TrailMap {
     if (!this.open || !this.base) return;
     this.time += 1 / 60;
     const ctx = this.ctx;
+    // The base is already at device pixels: draw it 1:1, not through the dpr transform.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.base, 0, 0);
+    ctx.restore();
     const [x, y] = this.toMap(pos.x, pos.z);
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 5);
     ctx.save();

@@ -50,6 +50,8 @@ export interface RiderState {
   /** Counts down after passing a kicker lip; a pop released while positive gets the lip bonus. */
   lipTimer: number;
   skateTimer: number;
+  /** Pushing along with poles (skis) or a back foot (board) this step. */
+  pushing: boolean;
 
   /** Flip angle (rad) for drawing; 0 = upright. */
   pitch: number;
@@ -101,6 +103,7 @@ export function createRider(sport: Sport = 'board', assist: AssistLevel = 'norma
     jumpHeld: false,
     lipTimer: 0,
     skateTimer: 0,
+    pushing: false,
     pitch: 0,
     spinVel: 0,
     flipVel: 0,
@@ -176,7 +179,9 @@ function stepGround(r: RiderState, input: RideInput, dt: number): void {
   const edgeRad = (Math.abs(r.edge) * sport.maxEdgeDeg * Math.PI) / 180;
   const carveRate = (speed * Math.sin(edgeRad)) / sport.sidecutRadius;
   const pivot = sport.pivotRate * Math.abs(r.edge) * Math.max(0, 1 - speed / 8);
-  r.tucking = input.up && !(r.sport === 'ski' && speed < RIDE.skateMaxSpeed);
+  // W pushes along when slow (flats, deep powder) and tucks once you're moving.
+  r.pushing = input.up && !input.down && speed < sport.pushMaxSpeed;
+  r.tucking = input.up && !r.pushing;
   let turnRate = Math.min(sport.maxTurnRate, Math.max(carveRate, pivot));
   if (r.tucking) turnRate *= 0.6;
   r.heading = wrapAngle(r.heading + Math.sign(r.edge) * turnRate * dt);
@@ -211,13 +216,13 @@ function stepGround(r: RiderState, input: RideInput, dt: number): void {
   const s = length(r.vel);
   if (s > 1e-6) r.vel = scale(r.vel, Math.max(0, s - decel * dt) / s);
 
-  gapSense(r, dt);
+  gapSense(r, (input.left ? 1 : 0) - (input.right ? 1 : 0), dt);
 
-  // Skiers skate on the flats with W.
+  // Pole (skis) or scoot (board) along on the flats and through deep powder with W.
   r.skateTimer -= dt;
-  if (r.sport === 'ski' && input.up && speed < RIDE.skateMaxSpeed && r.skateTimer <= 0) {
+  if (r.pushing && r.skateTimer <= 0) {
     r.vel = add(r.vel, scale(travel, sport.skatePush));
-    r.skateTimer = RIDE.skateInterval;
+    r.skateTimer = sport.pushInterval;
   }
 
   // Hold Space to load up, release to pop; releasing right at a kicker lip pops higher.
@@ -456,9 +461,10 @@ function updateFlow(r: RiderState, dt: number): void {
 
 /**
  * Gap sense: look down the line you're riding and, if a trunk is in the way, ease the direction of travel
- * toward the nearer open side. Strength depends on the assist setting; you still choose the line.
+ * toward the nearer open side. Strength depends on the assist setting; you still choose the line:
+ * while you steer, it only ever helps your turn along and never pulls against it.
  */
-function gapSense(r: RiderState, dt: number): void {
+function gapSense(r: RiderState, steer: number, dt: number): void {
   const strength = ASSIST[r.assist].gapSense;
   const speed = Math.hypot(r.vel.x, r.vel.z);
   if (strength <= 0 || speed < 3) return;
@@ -480,6 +486,8 @@ function gapSense(r: RiderState, dt: number): void {
   // Steer away from the trunk, harder when it's close ahead and dead center.
   const urgency = (1 - best.along / look) * (1 - Math.abs(best.side) / best.clear);
   const away = best.side >= 0 ? -1 : 1; // positive yaw turns toward +x, so turn the other way from the trunk
+  // Steering the other way round the trunk: that's your gap, so stay out of it.
+  if (steer !== 0 && steer !== away) return;
   const turn = away * strength * (0.4 + 0.6 * urgency) * dt;
   const c = Math.cos(turn);
   const sn = Math.sin(turn);

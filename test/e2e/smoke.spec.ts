@@ -83,7 +83,10 @@ test('skis swap in and the tuning panel opens', async ({ page }) => {
 
   // The style guide asks for every look at golden hour (the default) and at noon.
   await page.keyboard.press('Backquote');
+  // T steps on through the day from golden hour; jump straight to noon for the screenshot.
   await page.keyboard.press('KeyT');
+  expect((await telemetry(page)).sky.time).toBe('Blue hour');
+  await page.evaluate(() => window.__game!.setSky('Bluebird noon'));
   // Wait for whole frames drawn in the new light, not wall time: software GL can be slow.
   const lit = (await telemetry(page)).frame;
   await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 3, lit);
@@ -199,6 +202,10 @@ test('the village: walking, shops and the dogs', async ({ page }) => {
   // Outside the rental shop: step out of the bindings and walk in to the counter.
   await page.keyboard.press('KeyB');
   await page.waitForFunction(() => !window.__game!.telemetry().walking);
+  await page.evaluate(() => window.__game!.placeAt(-48, 1560));
+  await frames(3);
+  // The sign hangs clear of the roof.
+  await page.screenshot({ path: 'test/artifacts/rental-outside.png' });
   await page.evaluate(() => window.__game!.placeAt(-48, 1566));
   await frames(3);
   await page.keyboard.press('KeyB');
@@ -218,6 +225,12 @@ test('the village: walking, shops and the dogs', async ({ page }) => {
   // Clip back in by the door, ride over to the lodge and warm up by the fire.
   await page.keyboard.press('KeyB');
   await page.waitForFunction(() => !window.__game!.telemetry().walking);
+  // On skis now: W double-poles along the flat village floor.
+  await page.evaluate(() => window.__game!.placeAt(-20, 1610));
+  await page.keyboard.down('KeyW');
+  await page.waitForFunction(() => window.__game!.telemetry().speedKmh > 4, null, { timeout: 60_000 });
+  await page.screenshot({ path: 'test/artifacts/pole-push.png' });
+  await page.keyboard.up('KeyW');
   await page.evaluate(() => window.__game!.placeAt(48, 1580));
   await frames(3);
   await page.keyboard.press('KeyB');
@@ -244,6 +257,52 @@ test('the village: walking, shops and the dogs', async ({ page }) => {
   await page.waitForFunction(() => window.__game!.telemetry().walking);
   await page.waitForFunction(() => window.__game!.telemetry().prompt.includes('Bowie'), null, { timeout: 60_000 });
   await page.screenshot({ path: 'test/artifacts/bowie.png' });
+  expect(errors).toEqual([]);
+});
+
+test('time of day and weather', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  await load(page, errors);
+  const frames = async (n: number) => {
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction(([f, n]) => window.__game!.telemetry().frame > f + n, [f, n]);
+  };
+  // Y steps through the weather and says what it is.
+  await page.keyboard.press('KeyY');
+  const t = await telemetry(page);
+  expect(t.sky.weather).toBe('Flat light');
+  expect(t.prompt).toContain('Flat light');
+
+  // The same stretch of Kettle Run, past a lamp post, through the day and the weather.
+  const looks: [string, string, string][] = [
+    ['Dawn', 'Clear', 'sky-dawn'],
+    ['Morning', 'Clear', 'sky-morning'],
+    ['Blue hour', 'Clear', 'sky-blue-hour'],
+    ['Night', 'Clear', 'sky-night'],
+    ['Golden hour', 'Snowstorm', 'sky-storm'],
+    ['Bluebird noon', 'Flat light', 'sky-flat-light'],
+  ];
+  for (const [time, weather, shot] of looks) {
+    await page.evaluate(([time, weather]) => {
+      window.__game!.setSky(time, weather);
+      window.__game!.teleport(580, -12, 4);
+    }, [time, weather]);
+    await frames(4);
+    const sky = (await telemetry(page)).sky;
+    expect(sky).toEqual({ time, weather });
+    await page.screenshot({ path: `test/artifacts/${shot}.png` });
+  }
+
+  // The village after dark, windows lit.
+  await page.evaluate(() => {
+    window.__game!.setSky('Night', 'Clear');
+    window.__game!.placeAt(44, 1556);
+  });
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => window.__game!.telemetry().walking);
+  await frames(4);
+  await page.screenshot({ path: 'test/artifacts/village-night.png' });
   expect(errors).toEqual([]);
 });
 
@@ -301,4 +360,24 @@ test('events: countdown, a ghost to chase, and a result', async ({ page }) => {
   await page.keyboard.press('Backspace');
   await page.waitForFunction(() => window.__game!.telemetry().event === null);
   expect(errors).toEqual([]);
+});
+
+test.describe('on a high-DPI screen', () => {
+  test.use({ deviceScaleFactor: 1.5 });
+  test('the trail map fills the screen', async ({ page }) => {
+    const errors: string[] = [];
+    await load(page, errors);
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => window.__game!.telemetry().frame > 0);
+    // The paper sheet sits in the middle of the screen, top to bottom.
+    const paper = await page.evaluate(async () => {
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const c = document.getElementById('map') as HTMLCanvasElement;
+      const px = (x: number, y: number) => Array.from(c.getContext('2d')!.getImageData(Math.round(c.width * x), Math.round(c.height * y), 1, 1).data);
+      return [px(0.5, 0.03), px(0.5, 0.97)];
+    });
+    await page.screenshot({ path: 'test/artifacts/trail-map-hidpi.png' });
+    for (const [r, g, b] of paper) expect(r + g + b).toBeGreaterThan(600);
+    expect(errors).toEqual([]);
+  });
 });

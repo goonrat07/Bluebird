@@ -34,8 +34,12 @@ export interface SportTuning {
   frictionScale: number;
   /** How well the equipment floats in powder (0 = sinks, 1 = floats). */
   powderFloat: number;
-  /** Skis only: push speed added by skating on flats (m/s per push). */
+  /** W when slow: speed added per push (m/s): a double-pole on skis, a back-foot scoot on a board. */
   skatePush: number;
+  /** Pushing works below this speed (m/s); above it W tucks. */
+  pushMaxSpeed: number;
+  /** Seconds per push, start to start. */
+  pushInterval: number;
 }
 
 export const SPORTS: Record<Sport, SportTuning> = {
@@ -51,7 +55,9 @@ export const SPORTS: Record<Sport, SportTuning> = {
     tuckDrag: 0.55,
     frictionScale: 1.1,
     powderFloat: 0.8,
-    skatePush: 0,
+    skatePush: 0.7,
+    pushMaxSpeed: 3.5,
+    pushInterval: 0.7,
   },
   ski: {
     edgeRampTime: 0.22,
@@ -65,7 +71,9 @@ export const SPORTS: Record<Sport, SportTuning> = {
     tuckDrag: 0.5,
     frictionScale: 1.0,
     powderFloat: 0.55,
-    skatePush: 1.1,
+    skatePush: 1.2,
+    pushMaxSpeed: 6,
+    pushInterval: 0.6,
   },
 };
 
@@ -88,10 +96,6 @@ export const SNOW: Record<SnowType, SnowTuning> = {
 export const RIDE = {
   /** Friction coefficient while braking (skidding sideways to slow down). */
   brakeFriction: 0.55,
-  /** Below this speed (m/s), skis can skate with W. */
-  skateMaxSpeed: 4,
-  /** Seconds between skate pushes. */
-  skateInterval: 0.45,
   /** Stay glued to the snow over small dips (m). */
   groundSnap: 0.12,
   /** Seconds of holding Space for a full-strength pop. */

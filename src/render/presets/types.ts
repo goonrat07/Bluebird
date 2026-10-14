@@ -23,4 +23,6 @@ export interface LightPreset {
   exposure: number;
   /** Strength of the glitter on sunlit snow, 0..1. */
   sparkle: number;
+  /** How much the night lights are on: lamp posts, lit windows, the headlamp and the stars. 0 by day, 1 at night. */
+  lamps: number;
 }

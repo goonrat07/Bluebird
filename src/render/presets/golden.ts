@@ -17,5 +17,6 @@ export const golden: LightPreset = {
   fogDensity: 0.0012,
   snow: 0xf4f1ee,
   exposure: 0.95,
+  lamps: 0,
   sparkle: 1,
 };

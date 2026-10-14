@@ -197,6 +197,34 @@ describe('jumping and tricks', () => {
   });
 });
 
+describe('pushing along', () => {
+  // The village floor at the bottom of Kettle Run is near flat: no gravity to help.
+  const onTheFlat = (sport: Sport) => {
+    const r = createRider(sport);
+    r.pos = vec(-10, heightAt(-10, 1610), 1610);
+    r.vel = vec(0, 0, 0);
+    r.heading = Math.PI / 2;
+    return r;
+  };
+
+  for (const sport of ['ski', 'board'] as Sport[]) {
+    it(`W gets a ${sport === 'ski' ? 'skier' : 'snowboarder'} moving from a standstill on the flat`, () => {
+      const still = ride(3, () => ({}), onTheFlat(sport)).r;
+      const pushed = ride(3, () => ({ up: true }), onTheFlat(sport)).r;
+      expect(speedOf(still)).toBeLessThan(0.3);
+      expect(speedOf(pushed)).toBeGreaterThan(1.2);
+    });
+  }
+
+  it('W tucks instead of pushing once you are moving', () => {
+    const r = createRider('ski');
+    const fast = ride(4, () => ({ up: true }), r).r;
+    expect(speedOf(fast)).toBeGreaterThan(8);
+    expect(fast.pushing).toBe(false);
+    expect(fast.tucking).toBe(true);
+  });
+});
+
 describe('trees', () => {
   it('riding straight into a trunk is a crash', () => {
     const r = createRider();
@@ -224,6 +252,24 @@ describe('trees', () => {
     r.vel = vec(0, 0, 9);
     ride(1.5, () => ({}), r);
     expect(r.lastTrick?.name ?? 'none').not.toBe('Bail');
+  });
+
+  it('gap sense never pulls against the way you are steering', () => {
+    const tree = { x: centerX(600) + 30, z: 600 };
+    const target = TREES.reduce((best, t) =>
+      Math.hypot(t.x - tree.x, t.z - tree.z) < Math.hypot(best.x - tree.x, best.z - tree.z) ? t : best,
+    );
+    // Left alone, gap sense takes you right of this trunk; you steer left, past its other side.
+    const turn = (assist: 'relaxed' | 'real') => {
+      const r = createRider();
+      r.assist = assist;
+      r.pos = vec(target.x + 0.2, heightAt(target.x + 0.2, target.z - 8), target.z - 8);
+      r.vel = vec(0, 0, 9);
+      ride(0.05, () => ({ left: true }), r);
+      return r.heading;
+    };
+    // It may help the turn along, never hold it back.
+    expect(turn('relaxed')).toBeGreaterThanOrEqual(turn('real') - 1e-9);
   });
 
   it('skimming past trees builds Flow, and it drains in the open', () => {
