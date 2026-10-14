@@ -1,20 +1,29 @@
-import { TUNING } from './sim/tuning';
-import { createRider, speedOf, stepRider, type RiderState } from './sim/rider';
-import { Keyboard, type RideInput } from './sim/input';
+import { WORLD, type AssistLevel } from './sim/tuning';
+import { createRider, isSwitch, resetToSafeSpot, restart, speedOf, stepRider, swapSport, type RiderState } from './sim/rider';
+import { Keyboard, noInput, type Command, type RideInput } from './sim/input';
 import { SceneView } from './render/scene';
+import { Hud } from './ui/hud';
+import { TuningPanel } from './ui/tuningPanel';
 import { type Vec3, add, scale, sub } from './sim/vec';
 
 export interface Telemetry {
   frame: number;
   speedKmh: number;
+  sport: RiderState['sport'];
+  assist: AssistLevel;
   grounded: boolean;
-  airTime: number;
+  crashed: boolean;
+  switch: boolean;
+  snow: RiderState['snow'];
+  edge: number;
   heading: number;
   pos: Vec3;
+  lastTrick: string | null;
+  landings: number;
   fps: number;
 }
 
-const STEP = 1 / TUNING.stepHz;
+const STEP = 1 / WORLD.stepHz;
 
 // Fixed-step simulation with interpolated rendering: riding behaves the same at 30 or 144 fps.
 export class Game {
@@ -26,10 +35,11 @@ export class Game {
   private fps = 0;
   private snapCamera = true;
   private readonly keyboard = new Keyboard(window);
-  private readonly speedEl = document.getElementById('speed');
+  private readonly hud = new Hud();
+  private readonly tuning = new TuningPanel();
 
   constructor(private readonly view: SceneView) {
-    this.keyboard.onReset(() => this.reset());
+    this.keyboard.onCommand((c) => this.command(c));
   }
 
   start(): void {
@@ -39,10 +49,19 @@ export class Game {
     });
   }
 
-  reset(): void {
-    this.rider = createRider();
-    this.prevPos = { ...this.rider.pos };
-    this.snapCamera = true;
+  command(c: Command): void {
+    if (c === 'reset') resetToSafeSpot(this.rider);
+    else if (c === 'restart') restart(this.rider);
+    else if (c === 'swapSport') swapSport(this.rider);
+    else if (c === 'toggleTuning') this.tuning.toggle();
+    if (c === 'reset' || c === 'restart') {
+      this.prevPos = { ...this.rider.pos };
+      this.snapCamera = true;
+    }
+  }
+
+  setAssist(level: AssistLevel): void {
+    this.rider.assist = level;
   }
 
   telemetry(): Telemetry {
@@ -50,10 +69,17 @@ export class Game {
     return {
       frame: this.frame,
       speedKmh: speedOf(r) * 3.6,
+      sport: r.sport,
+      assist: r.assist,
       grounded: r.grounded,
-      airTime: r.airTime,
+      crashed: r.crashed,
+      switch: isSwitch(r),
+      snow: r.snow,
+      edge: r.edge,
       heading: r.heading,
       pos: { ...r.pos },
+      lastTrick: r.lastTrick?.name ?? null,
+      landings: r.landings,
       fps: this.fps,
     };
   }
@@ -63,19 +89,44 @@ export class Game {
     this.lastTime = now;
     if (dt > 0) this.fps += (1 / dt - this.fps) * 0.1;
 
-    const input: RideInput = this.keyboard.state;
+    const input: RideInput = document.hidden ? noInput() : this.keyboard.state;
+    let landed = false;
     this.accumulator += dt;
     while (this.accumulator >= STEP) {
       this.prevPos = { ...this.rider.pos };
+      const before = this.rider.grounded;
       stepRider(this.rider, input, STEP);
+      if (!before && this.rider.grounded) landed = true;
       this.accumulator -= STEP;
     }
     const alpha = this.accumulator / STEP;
-    const drawPos = add(this.prevPos, scale(sub(this.rider.pos, this.prevPos), alpha));
+    const r = this.rider;
+    const pos = add(this.prevPos, scale(sub(r.pos, this.prevPos), alpha));
 
-    this.view.render(drawPos, this.rider.heading, dt, this.snapCamera);
+    this.view.render(
+      {
+        pos,
+        vel: r.vel,
+        heading: r.heading,
+        pitch: r.pitch,
+        edge: r.edge,
+        speed: speedOf(r),
+        sport: r.sport,
+        grounded: r.grounded,
+        crashed: r.crashed,
+        crashTimer: r.crashTimer,
+        charge: r.charge,
+        tucking: r.tucking,
+        braking: r.braking,
+        skidding: r.skidding,
+        grab: r.grab,
+        justLanded: landed,
+      },
+      dt,
+      this.snapCamera,
+    );
     this.snapCamera = false;
-    if (this.speedEl) this.speedEl.textContent = `${Math.round(speedOf(this.rider) * 3.6)} km/h`;
+    this.hud.update(dt, speedOf(r) * 3.6, r.sport, r.assist, r.lastTrick, r.landings);
 
     this.frame++;
     requestAnimationFrame((t) => this.tick(t));
