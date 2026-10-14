@@ -5,6 +5,7 @@ import { noInput, type RideInput } from '../../src/sim/input';
 import { WORLD, type Sport } from '../../src/sim/tuning';
 import { vec } from '../../src/sim/vec';
 import { TREES } from '../../src/sim/trees';
+import { placeRider } from '../../src/sim/events';
 
 const STEP = 1 / WORLD.stepHz;
 type Script = (t: number, r: RiderState) => Partial<RideInput>;
@@ -66,7 +67,7 @@ describe('riding', () => {
   });
 
   it('travel follows the equipment through a carve', () => {
-    const { r } = ride(1.5, () => ({ right: true }), cruising());
+    const { r } = ride(0.8, () => ({ right: true }), cruising());
     const travel = Math.atan2(r.vel.x, r.vel.z);
     expect(r.heading).toBeLessThan(-0.4);
     expect(Math.abs(travel - r.heading)).toBeLessThan(0.35);
@@ -143,7 +144,7 @@ describe('jumping and tricks', () => {
   it('finishes a nearly complete 360 by itself on the normal setting', () => {
     const r = launched();
     // Let go of the spin key a bit early; the finish-assist completes the rotation.
-    ride(4, (t) => ({ left: t < 0.8 }), r);
+    ride(4, (t) => ({ left: t < 0.62 }), r);
     expect(r.crashed).toBe(false);
     expect(r.lastTrick?.name).toMatch(/360/);
   });
@@ -158,7 +159,7 @@ describe('jumping and tricks', () => {
     const r = cruising();
     const before = r.heading;
     ride(0.5, () => ({ left: true, jump: true }), r);
-    ride(0.4, () => ({ left: true }), r);
+    ride(0.25, () => ({ left: true }), r);
     expect(r.grounded).toBe(false);
     expect(r.heading - before).toBeGreaterThan(1.5);
   });
@@ -174,15 +175,15 @@ describe('jumping and tricks', () => {
   it('crashes landing sideways, and rides away on the relaxed setting if it is close', () => {
     const sideways = launched();
     sideways.assist = 'real'; // no rotation finish-assist
-    ride(4, (t) => ({ left: t < 0.27 }), sideways); // about 90 degrees
+    ride(4, (t) => ({ left: t < 0.21 }), sideways); // about 90 degrees
     expect(sideways.lastTrick?.name).toBe('Bail');
 
     const relaxed = launched();
     relaxed.assist = 'relaxed';
     const normal = launched();
     // About 45 degrees off: too much for normal, fine for relaxed.
-    ride(4, (t) => ({ left: t < 0.13 }), relaxed);
-    ride(4, (t) => ({ left: t < 0.13 }), normal);
+    ride(4, (t) => ({ left: t < 0.1 }), relaxed);
+    ride(4, (t) => ({ left: t < 0.1 }), normal);
     expect(relaxed.lastTrick?.name).not.toBe('Bail');
     expect(normal.lastTrick?.name).toBe('Bail');
   });
@@ -190,11 +191,75 @@ describe('jumping and tricks', () => {
   it('puts the rider back on the slope after a crash', () => {
     const r = launched();
     r.assist = 'real';
-    ride(1.5, (t) => ({ left: t < 0.27 }), r);
+    ride(1.5, (t) => ({ left: t < 0.21 }), r);
     ride(3, () => ({}), r);
     expect(r.crashed).toBe(false);
     expect(r.grounded).toBe(true);
   });
+});
+
+describe('steering control', () => {
+  /** A rider on the groomer moving straight downhill at `speed`. */
+  const moving = (sport: Sport, speed: number) => {
+    const r = createRider(sport);
+    placeRider(r, 180, 0, speed);
+    return r;
+  };
+  const travel = (r: RiderState) => Math.atan2(r.vel.x, r.vel.z);
+
+  for (const sport of ['board', 'ski'] as Sport[]) {
+    it(`${sport}: no slow-speed dead zone, a quarter turn at 6 m/s takes under a second`, () => {
+      const r = moving(sport, 6);
+      let t = 0;
+      while (travel(r) < Math.PI / 2 && t < 3) {
+        stepRider(r, { ...noInput(), left: true }, STEP);
+        t += STEP;
+      }
+      expect(t).toBeLessThan(1);
+    });
+
+    it(`${sport}: a full carve at speed on the groomer holds its edge instead of skidding`, () => {
+      const r = moving(sport, 16);
+      let skids = 0;
+      let steps = 0;
+      ride(0.8, (_, s) => {
+        steps++;
+        if (s.skidding) skids++;
+        return { right: true };
+      }, r);
+      expect(skids / steps).toBeLessThan(0.1);
+      expect(Math.abs(travel(r) - r.heading)).toBeLessThan(0.15);
+    });
+
+    it(`${sport}: pressing the other way snaps straight across to the other edge`, () => {
+      const r = moving(sport, 10);
+      ride(0.5, () => ({ left: true }), r);
+      expect(r.edge).toBeCloseTo(1);
+      ride(0.12, () => ({ right: true }), r);
+      expect(r.edge).toBeLessThan(-0.5);
+    });
+
+    it(`${sport}: S + A/D pivots the equipment round fast and bleeds speed`, () => {
+      const r = moving(sport, 12);
+      ride(0.5, () => ({ left: true, down: true }), r);
+      expect(r.heading).toBeGreaterThan(Math.PI / 2);
+      expect(speedOf(r)).toBeLessThan(10);
+    });
+
+    it(`${sport}: holding S + A/D stops sideways like a hockey stop instead of spinning round`, () => {
+      const r = moving(sport, 14);
+      // Add up the heading change step by step, so a full spin can't hide behind angle wrapping.
+      let turned = 0;
+      let last = r.heading;
+      ride(0.8, (_, s) => {
+        turned += Math.atan2(Math.sin(s.heading - last), Math.cos(s.heading - last));
+        last = s.heading;
+        return { left: true, down: true };
+      }, r);
+      expect(turned).toBeGreaterThan(1.2);
+      expect(turned).toBeLessThan(2.6);
+    });
+  }
 });
 
 describe('pushing along', () => {

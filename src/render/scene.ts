@@ -44,11 +44,21 @@ export const CAMERA = {
   distance: 7,
   speedDistance: 0.07,
   speedDistanceMax: 3,
-  /** Metres above the rider. */
-  height: 7.5,
+  /** Metres above the rider when slow; it drops toward `fastHeight` by `fastSpeed` (m/s) so speed reads. */
+  height: 7,
+  fastHeight: 4.4,
+  fastSpeed: 26,
   lookHeight: 0.6,
-  /** Look this far ahead of the rider, so more of the run below is in view. */
+  /** Look this far ahead of the rider, so more of the run below is in view; further when fast. */
   lookAhead: 2,
+  fastLookAhead: 9,
+  /** Camera roll into a turn, radians per g sideways, and its cap. */
+  roll: 0.035,
+  rollMax: 0.07,
+  /** Shake: trauma added by a landing per m/s of speed, how fast it fades (1/s), and the size at full trauma (m). */
+  landingTrauma: 0.025,
+  traumaDecay: 1.4,
+  shake: 0.12,
   /** In the glade the camera drops lower and tighter. */
   gladeHeight: 4,
   gladeDistance: 5.5,
@@ -87,6 +97,10 @@ export class SceneView {
   private readonly camPos = new THREE.Vector3();
   private readonly camLook = new THREE.Vector3();
   private camYaw = 0;
+  private camRoll = 0;
+  /** Camera shake, 0..1; felt as its square. */
+  private trauma = 0;
+  private shakeTime = 0;
   private glade = 0;
   private presetIndex = 0;
   private weatherIndex = 0;
@@ -316,8 +330,11 @@ export class SceneView {
         ? CAMERA.insideDistance
         : CAMERA.walkDistance
       : CAMERA.distance + (CAMERA.gladeDistance - CAMERA.distance) * g + Math.min(CAMERA.speedDistanceMax, v.speed * CAMERA.speedDistance);
-    const height = onFoot ? (v.inside ? CAMERA.insideHeight : CAMERA.walkHeight) : CAMERA.height + (CAMERA.gladeHeight - CAMERA.height) * g;
-    const lookAhead = CAMERA.lookAhead + (CAMERA.gladeLookAhead - CAMERA.lookAhead) * g;
+    const fast = Math.min(1, v.speed / CAMERA.fastSpeed);
+    const open = CAMERA.height + (CAMERA.fastHeight - CAMERA.height) * fast;
+    const height = onFoot ? (v.inside ? CAMERA.insideHeight : CAMERA.walkHeight) : open + (CAMERA.gladeHeight - open) * g;
+    const ahead = onFoot ? CAMERA.lookAhead : CAMERA.lookAhead + (CAMERA.fastLookAhead - CAMERA.lookAhead) * fast;
+    const lookAhead = ahead + (CAMERA.gladeLookAhead - ahead) * g;
     const desired = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z).addScaledVector(back, distance);
     desired.y = Math.max(v.pos.y + height, heightAt(desired.x, desired.z) + 2);
     const look = new THREE.Vector3(v.pos.x, v.pos.y + CAMERA.lookHeight, v.pos.z).addScaledVector(back, -lookAhead);
@@ -326,6 +343,18 @@ export class SceneView {
     this.camLook.lerp(look, kp);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
+
+    // Lean the horizon a touch into the turn, and shake on hard landings and at full speed.
+    const rollTarget = onFoot || v.chair !== null ? 0 : Math.max(-CAMERA.rollMax, Math.min(CAMERA.rollMax, (v.turnG ?? 0) * CAMERA.roll));
+    this.camRoll = snap ? rollTarget : this.camRoll + (rollTarget - this.camRoll) * (1 - Math.exp(-4 * dt));
+    if (v.justLanded) this.trauma = Math.min(1, this.trauma + v.speed * CAMERA.landingTrauma);
+    this.trauma = Math.max(Math.max(0, (v.speed - 18) / 40) * (v.grounded ? 1 : 0), this.trauma - CAMERA.traumaDecay * dt);
+    this.shakeTime += dt;
+    const s = this.trauma * this.trauma * CAMERA.shake;
+    const t = this.shakeTime * 13;
+    this.camera.position.x += s * (Math.sin(t * 1.3) + Math.sin(t * 2.9)) * 0.5;
+    this.camera.position.y += s * (Math.sin(t * 1.7 + 1) + Math.sin(t * 3.1)) * 0.5;
+    this.camera.rotateZ(this.camRoll + s * 0.15 * Math.sin(t * 2.3));
 
     const fov = 62 + Math.min(16, v.speed * 0.35) + v.flow * 6;
     if (Math.abs(this.camera.fov - fov) > 0.05) {

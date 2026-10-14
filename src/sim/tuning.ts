@@ -18,12 +18,16 @@ export interface SportTuning {
   edgeReleaseTime: number;
   /** Deepest edge angle in degrees. */
   maxEdgeDeg: number;
-  /** Sidecut radius in metres: smaller carves tighter turns. */
-  sidecutRadius: number;
-  /** Turn rate (rad/s) available at a standstill, so slow riders can still pivot. */
-  pivotRate: number;
-  /** Fastest the rider can ever turn (rad/s). */
-  maxTurnRate: number;
+  /** Seconds to go edge to edge when you press the other key (snaps through flat, no release-then-ramp). */
+  edgeFlipTime: number;
+  /**
+   * Full-lock turn rate: `min(turnRateLow, turnAccel·g / speed)`. Slow, you can swing round at `turnRateLow`;
+   * fast, the turn is limited to `turnAccel` g sideways, kept under groomed grip so a full carve holds instead of skidding.
+   */
+  turnRateLow: number;
+  turnAccel: number;
+  /** S + A/D: a braking pivot that swings the equipment round this fast (rad/s) and scrubs speed. */
+  skidTurnRate: number;
   /** Share of speed kept when sideways motion is carved into forward motion (1 = lossless). */
   carveEfficiency: number;
   /** Air drag coefficient (per metre). */
@@ -44,12 +48,13 @@ export interface SportTuning {
 
 export const SPORTS: Record<Sport, SportTuning> = {
   board: {
-    edgeRampTime: 0.32,
-    edgeReleaseTime: 0.22,
+    edgeRampTime: 0.26,
+    edgeReleaseTime: 0.13,
     maxEdgeDeg: 62,
-    sidecutRadius: 8,
-    pivotRate: 1.4,
-    maxTurnRate: 2.6,
+    edgeFlipTime: 0.11,
+    turnRateLow: 2.4,
+    turnAccel: 1.75,
+    skidTurnRate: 4.2,
     carveEfficiency: 0.985,
     airDrag: 0.007,
     tuckDrag: 0.55,
@@ -60,12 +65,13 @@ export const SPORTS: Record<Sport, SportTuning> = {
     pushInterval: 0.7,
   },
   ski: {
-    edgeRampTime: 0.22,
-    edgeReleaseTime: 0.16,
+    edgeRampTime: 0.2,
+    edgeReleaseTime: 0.11,
     maxEdgeDeg: 60,
-    sidecutRadius: 13,
-    pivotRate: 1.2,
-    maxTurnRate: 2.4,
+    edgeFlipTime: 0.09,
+    turnRateLow: 2.3,
+    turnAccel: 1.6,
+    skidTurnRate: 4.6,
     carveEfficiency: 0.99,
     airDrag: 0.0065,
     tuckDrag: 0.5,
@@ -85,17 +91,25 @@ export interface SnowTuning {
   grip: number;
   /** Extra drag (per metre) from ploughing through deep snow, reduced by float and speed. */
   sinkDrag: number;
+  /** Turn strength here: powder turns softer and surfs; ice turns as hard as anywhere but the grip lets go. */
+  turn: number;
 }
 
 export const SNOW: Record<SnowType, SnowTuning> = {
-  groomed: { friction: 0.04, grip: 1.6, sinkDrag: 0 },
-  powder: { friction: 0.07, grip: 1.25, sinkDrag: 0.05 },
-  ice: { friction: 0.02, grip: 0.55, sinkDrag: 0 },
+  groomed: { friction: 0.04, grip: 1.9, sinkDrag: 0, turn: 1 },
+  powder: { friction: 0.07, grip: 1.3, sinkDrag: 0.05, turn: 0.8 },
+  ice: { friction: 0.02, grip: 0.55, sinkDrag: 0, turn: 1 },
 };
 
 export const RIDE = {
   /** Friction coefficient while braking (skidding sideways to slow down). */
   brakeFriction: 0.55,
+  /** S + A/D swings the equipment this far across your line of travel (rad), then holds it there. */
+  skidHoldAngle: 1.35,
+  /** Braking, the share of sideways speed the edge turns back into forward speed (the rest scrubs off). */
+  skidKeep: 0.15,
+  /** Braking, the edge bites at this share of its carving grip, so a hockey stop slows you at about 1 g. */
+  skidGrip: 0.5,
   /** Stay glued to the snow over small dips (m). */
   groundSnap: 0.12,
   /** Seconds of holding Space for a full-strength pop. */
@@ -110,9 +124,9 @@ export const RIDE = {
 
 export const AIR = {
   /** Spin speed in rad/s (a 360 takes 2π / spinRate seconds). */
-  spinRate: 7.0,
+  spinRate: 9.0,
   /** How fast spin speeds up and settles (1/s). */
-  spinResponse: 9,
+  spinResponse: 12,
   /** Flip speed in rad/s. */
   flipRate: 5.2,
   flipResponse: 7,
@@ -149,7 +163,7 @@ export const ASSIST: Record<AssistLevel, AssistTuning> = {
 
 export const CRASH = {
   /** Seconds of tumbling before the rider is put back on the slope. */
-  tumbleTime: 1.3,
+  tumbleTime: 0.9,
   /** Friction while tumbling. */
   tumbleFriction: 0.9,
   /** Speed (m/s) into a tree trunk above which it is a crash, not a stumble. */

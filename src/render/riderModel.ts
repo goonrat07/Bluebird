@@ -24,12 +24,21 @@ export interface RiderPose {
   walkSpeed?: number;
   /** Pushing along (W when slow): 0..1 through the push, or null. */
   push?: number | null;
+  /** Sideways g of the turn (positive turning left), for leaning and balance. */
+  turnG?: number;
 }
 
 /** How quickly the body catches up with the equipment (1/s). Lower = more weight and lag. */
 export const BODY = {
   lean: 9,
-  crouch: 12,
+  /** Lean = atan(sideways g) times this, plus a little from the edge so slow pivots still read. */
+  leanFromG: 0.6,
+  leanFromEdge: 0.12,
+  /** Crouch spring: natural frequency (Hz) and damping ratio, so landings compress and rebound. */
+  crouchHz: 7,
+  crouchDamping: 0.65,
+  /** The outside arm lifts for balance in a turn (rad per g), the inside one drops. */
+  balanceArms: 0.55,
   arms: 10,
   /** Upper body turns ahead into the turn by this much at full edge (rad). */
   leadYaw: 0.35,
@@ -73,6 +82,7 @@ export class RiderModel {
   private sport: Sport | null = null;
   private leanNow = 0;
   private crouchNow = 0.15;
+  private crouchVel = 0;
   private armL = 0.35;
   private armR = 0.35;
   private leadNow = 0;
@@ -223,7 +233,11 @@ export class RiderModel {
       return;
     }
 
-    if (p.grounded && !this.wasGrounded) this.squash = BODY.landingSquash;
+    if (p.grounded && !this.wasGrounded) {
+      this.squash = BODY.landingSquash;
+      // Kick the crouch spring down on touchdown, harder the faster you land.
+      this.crouchVel += 2 + Math.min(4, p.speed * 0.15);
+    }
     this.wasGrounded = p.grounded;
     this.squash = follow(this.squash, 0, BODY.landingRecover, dt);
 
@@ -231,21 +245,31 @@ export class RiderModel {
     // Lean into the turn. Riding switch the body faces the other way, so the lean flips with it.
     const maxEdge = (SPORTS[p.sport].maxEdgeDeg * Math.PI) / 180;
     const dir = p.switch ? -1 : 1;
-    const leanTarget = p.grounded ? dir * p.edge * maxEdge * 0.6 * Math.min(1, p.speed / 8) : 0;
+    // Lean into the turn you're actually making: measured sideways g, capped at the equipment's edge angle.
+    const g = p.turnG ?? 0;
+    const lean = Math.atan(Math.abs(g)) * BODY.leanFromG * Math.sign(g) + p.edge * BODY.leanFromEdge;
+    const leanTarget = p.grounded ? dir * Math.max(-maxEdge * 0.6, Math.min(maxEdge * 0.6, lean)) : 0;
     this.leanNow = follow(this.leanNow, leanTarget, BODY.lean, dt);
     this.lean.rotation.z = -this.leanNow;
 
     // The upper body looks into the turn a moment before the legs follow.
     const leadTarget = p.grounded ? dir * p.edge * BODY.leadYaw : 0;
     this.leadNow = follow(this.leadNow, leadTarget, BODY.lead, dt);
-    this.torso.rotation.y = this.leadNow;
+    // Loading a pop with a key held: the shoulders wind up against the spin that's coming.
+    this.torso.rotation.y = this.leadNow - (p.grounded ? dir * p.edge * 0.6 * p.charge : 0);
 
     let crouch = p.grounded ? Math.max(p.charge * 0.6, p.tucking ? 0.55 : 0.15, p.braking ? 0.3 : 0) : 0.25;
     if (p.grab) crouch = 0.75;
-    this.crouchNow = follow(this.crouchNow, crouch, BODY.crouch, dt);
-    this.setCrouch(Math.min(1, this.crouchNow + this.squash));
+    // A damped spring rather than a plain ease, so the body compresses and rebounds.
+    const w = 2 * Math.PI * BODY.crouchHz;
+    const h = Math.min(dt, 1 / 30);
+    this.crouchVel += (w * w * (crouch - this.crouchNow) - 2 * BODY.crouchDamping * w * this.crouchVel) * h;
+    this.crouchNow = Math.max(0, Math.min(1, this.crouchNow + this.crouchVel * h));
+    this.setCrouch(Math.min(1, this.crouchNow + this.squash * 0.5));
 
-    const [l, r] = p.grab ? [-0.4, -2.3] : p.tucking ? [-1.0, -1.0] : [0.35, 0.35];
+    // Arms out for balance: the outside arm rises through a turn and the inside one drops.
+    const bal = p.grounded ? Math.max(-1, Math.min(1, g)) * BODY.balanceArms * dir : 0;
+    const [l, r] = p.grab ? [-0.4, -2.3] : p.tucking ? [-1.0, -1.0] : [0.35 - 0.6 * bal, 0.35 + bal];
     this.armL = follow(this.armL, l, BODY.arms, dt);
     this.armR = follow(this.armR, r, BODY.arms, dt);
     this.setArms(this.armL, this.armR);
