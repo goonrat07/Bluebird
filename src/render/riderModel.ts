@@ -30,6 +30,9 @@ export interface RiderPose {
   push?: number | null;
   /** Sideways g of the turn (positive turning left), for leaning and balance. */
   turnG?: number;
+  /** Velocity, so the upper body can face down the fall line through a skid. */
+  vel?: { x: number; y: number; z: number };
+  skidding?: boolean;
 }
 
 /** How quickly the body catches up with the equipment (1/s). Lower = more weight and lag. */
@@ -56,7 +59,22 @@ export const BODY = {
   /** The body stays nearer upright than the slope: it leans back this share of the pitch on steeps,
    * and keeps this share of upright when traversing (angulating into the hill). */
   slopeLeanBack: 0.15,
+  /** A snowboarder stands across the board, so leaning back would tip them over the tail: much less. */
+  slopeLeanBackBoard: 0.04,
   slopeAngulate: 0.6,
+  /** Ready stance: knees bend more with speed (full by speedFull m/s) and on steeper snow (per rad of pitch). */
+  crouchBase: 0.15,
+  crouchSpeed: 0.2,
+  speedFull: 22,
+  crouchSteep: 0.35,
+  /** Rolls: the knees soak up a change of pitch underfoot (crouch speed per rad of pitch change). */
+  absorb: 2.2,
+  /** Hands reach forward with speed (rad at speedFull) and come in from the sides. */
+  reachSpeed: 0.45,
+  /** Knees press into the turn, a share of the lean. */
+  kneeAngulate: 0.5,
+  /** Through a skid the upper body keeps facing where you're going, this share of the way. */
+  skidCounter: 0.5,
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -141,6 +159,9 @@ export class RiderModel {
   private leadNow = 0;
   private squash = 0;
   private wasGrounded = true;
+  /** Pitch of the snow underfoot (rad, nose down positive), as the equipment has settled to it. */
+  private slopePitch = 0;
+  private counterNow = 0;
 
   constructor() {
     // Flip around the rider's middle, not their feet.
@@ -298,7 +319,11 @@ export class RiderModel {
     groundN.copy(UP).applyQuaternion(this.ground.quaternion);
     const pitch = Math.atan2(groundN.z, groundN.y);
     const roll = Math.atan2(-groundN.x, groundN.y);
-    this.upright.rotation.set(-pitch * BODY.slopeLeanBack, 0, -roll * BODY.slopeAngulate);
+    const back = p.sport === 'board' ? BODY.slopeLeanBackBoard : BODY.slopeLeanBack;
+    this.upright.rotation.set(-pitch * back, 0, -roll * BODY.slopeAngulate);
+    // A dip (the slope easing off under you) compresses the knees; a crest lets them extend.
+    if (onSnow && dt > 0) this.crouchVel -= (pitch - this.slopePitch) * BODY.absorb * Math.min(1, dt * 60);
+    this.slopePitch = pitch;
   }
 
   update(p: RiderPose, dt: number): void {
@@ -382,16 +407,30 @@ export class RiderModel {
     // The upper body looks into the turn a moment before the legs follow.
     const leadTarget = p.grounded ? dir * p.edge * BODY.leadYaw : 0;
     this.leadNow = follow(this.leadNow, leadTarget, BODY.lead, dt);
+    // Skidding, the hips swing across while the shoulders keep facing down the hill.
+    let counter = 0;
+    if (p.grounded && p.skidding && p.vel && Math.hypot(p.vel.x, p.vel.z) > 1) {
+      const across = Math.atan2(Math.sin(p.heading - Math.atan2(p.vel.x, p.vel.z)), Math.cos(p.heading - Math.atan2(p.vel.x, p.vel.z)));
+      counter = -across * BODY.skidCounter;
+    }
+    this.counterNow = follow(this.counterNow, counter, BODY.lead, dt);
     // Loading a pop with a key held: the shoulders wind up against the spin that's coming.
-    this.j.torsoYaw = this.leadNow - (p.grounded ? dir * p.edge * 0.6 * p.charge : 0);
+    this.j.torsoYaw = this.leadNow + this.counterNow - (p.grounded ? dir * p.edge * 0.6 * p.charge : 0);
 
-    let crouch = p.grounded ? Math.max(p.charge * 0.6, p.tucking ? 0.55 : 0.15, p.braking ? 0.3 : 0) : 0.25;
+    // Ready stance: lower the faster you go and the steeper it gets.
+    const fast = Math.min(1, p.speed / BODY.speedFull);
+    const ready = BODY.crouchBase + fast * BODY.crouchSpeed + Math.max(0, this.slopePitch) * BODY.crouchSteep;
+    let crouch = p.grounded ? Math.max(p.charge * 0.6, p.tucking ? 0.55 : ready, p.braking ? 0.3 : 0) : 0.25;
     if (p.grab) crouch = 0.75;
     // A damped spring rather than a plain ease, so the body compresses and rebounds.
     const w = 2 * Math.PI * BODY.crouchHz;
-    const h = Math.min(dt, 1 / 30);
-    this.crouchVel += (w * w * (crouch - this.crouchNow) - 2 * BODY.crouchDamping * w * this.crouchVel) * h;
-    this.crouchNow = Math.max(0, Math.min(1, this.crouchNow + this.crouchVel * h));
+    // Small steps keep the spring steady even when frames are slow.
+    const steps = Math.ceil(Math.min(dt, 0.1) * 240);
+    const h = Math.min(dt, 0.1) / Math.max(1, steps);
+    for (let i = 0; i < steps; i++) {
+      this.crouchVel += (w * w * (crouch - this.crouchNow) - 2 * BODY.crouchDamping * w * this.crouchVel) * h;
+      this.crouchNow = Math.max(0, Math.min(1, this.crouchNow + this.crouchVel * h));
+    }
     this.setCrouch(Math.min(1, this.crouchNow + this.squash * 0.5));
 
     // Arms out for balance: the outside arm rises through a turn and the inside one drops.
@@ -400,6 +439,12 @@ export class RiderModel {
     this.armL = follow(this.armL, l, BODY.arms, dt);
     this.armR = follow(this.armR, r, BODY.arms, dt);
     this.setArms(this.armL, this.armR);
+    // Hands reach forward as speed builds, like holding a tray out in front.
+    const reach = p.grounded && !p.grab && !p.tucking ? -fast * BODY.reachSpeed : 0;
+    this.j.armX = [reach, reach];
+    // Knees press into the turn with the lean (both together on skis, the board's edge for a board).
+    const knees = p.grounded ? this.leanNow * BODY.kneeAngulate * (p.sport === 'ski' ? 1 : 0.5) : 0;
+    this.j.legZ = [knees, knees];
     if (p.push !== null && p.push !== undefined && p.grounded) this.pushPose(p.sport, p.push);
     this.applyPose();
     this.placePoles();
