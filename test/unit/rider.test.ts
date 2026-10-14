@@ -359,3 +359,28 @@ describe('trees', () => {
     expect(open.flow).toBeLessThan(built);
   });
 });
+
+describe('steep runs', () => {
+  it.each(['ski', 'board'] as const)('rides Kettle Couloir on %s without hopping off the snow', (sport) => {
+    const r = createRider(sport);
+    placeRider(r, -390, 0, 5, 'couloir');
+    let airborne = 0;
+    for (let i = 0; i < 15 * WORLD.stepHz; i++) {
+      stepRider(r, noInput(), STEP);
+      if (!r.grounded) airborne++;
+    }
+    expect(airborne).toBe(0);
+    expect(r.crashed).toBe(false);
+    expect(r.pos.z).toBeGreaterThan(-200); // made it most of the way down, not stuck on a ledge
+  });
+
+  it('has no steps in the snow of the side runs', () => {
+    // The runs are baked into 1 m tables; reading between entries must stay smooth.
+    for (let z = -380; z < -370; z += 0.1) {
+      const x = -59.5;
+      const drop = heightAt(x, z) - heightAt(x, z + 0.1);
+      expect(drop).toBeGreaterThan(0.03);
+      expect(drop).toBeLessThan(0.12);
+    }
+  });
+});
