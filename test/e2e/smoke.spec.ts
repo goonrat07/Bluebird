@@ -56,10 +56,10 @@ test('jumping, spinning and landing produce a result', async ({ page }) => {
   await page.keyboard.down('Space');
   await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 20, holdFrom);
   await page.keyboard.up('Space');
-  await page.waitForFunction(() => !window.__game!.telemetry().grounded, null, { timeout: 5_000 });
+  await page.waitForFunction(() => !window.__game!.telemetry().grounded, null, { timeout: 30_000 });
   await page.keyboard.down('KeyA');
   await page.screenshot({ path: 'test/artifacts/air.png' });
-  await page.waitForFunction(() => window.__game!.telemetry().grounded, null, { timeout: 10_000 });
+  await page.waitForFunction(() => window.__game!.telemetry().grounded, null, { timeout: 60_000 }); // a jump can span many slow frames
   await page.keyboard.up('KeyA');
 
   const t = await telemetry(page);
@@ -84,7 +84,9 @@ test('skis swap in and the tuning panel opens', async ({ page }) => {
   // The style guide asks for every look at golden hour (the default) and at noon.
   await page.keyboard.press('Backquote');
   await page.keyboard.press('KeyT');
-  await page.waitForTimeout(300);
+  // Wait for whole frames drawn in the new light, not wall time: software GL can be slow.
+  const lit = (await telemetry(page)).frame;
+  await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 3, lit);
   await page.screenshot({ path: 'test/artifacts/noon.png' });
   expect(errors).toEqual([]);
 });
