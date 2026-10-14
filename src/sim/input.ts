@@ -28,7 +28,17 @@ const KEYMAP: Record<string, keyof RideInput> = {
 };
 
 /** One-shot actions that aren't held riding inputs. */
-export type Command = 'reset' | 'restart' | 'swapSport' | 'toggleTuning' | 'cycleLight' | 'toggleMute' | 'slopestyle' | 'treeRun';
+export type Command =
+  | 'reset'
+  | 'restart'
+  | 'swapSport'
+  | 'toggleTuning'
+  | 'cycleLight'
+  | 'toggleMute'
+  | 'slopestyle'
+  | 'treeRun'
+  | 'lift'
+  | 'toggleMap';
 
 const COMMANDS: Record<string, Command> = {
   KeyR: 'reset',
@@ -39,6 +49,8 @@ const COMMANDS: Record<string, Command> = {
   KeyM: 'toggleMute',
   Digit1: 'slopestyle',
   Digit2: 'treeRun',
+  KeyE: 'lift',
+  Tab: 'toggleMap',
 };
 
 export class Keyboard {

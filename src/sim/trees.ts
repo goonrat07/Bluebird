@@ -1,4 +1,5 @@
-import { MOUNTAIN_BOUNDS, RUN, RUNS, centerX, heightAt, lateral, normalAt } from './terrain';
+import { CAT_TRACKS, MOUNTAIN_BOUNDS, RUN, RUNS, centerX, heightAt, lateral, nearTrack, normalAt } from './terrain';
+import { LIFTS } from './lifts';
 
 export interface Tree {
   /** Index in TREES. */
@@ -64,8 +65,17 @@ function generate(): Tree[] {
       open.push({ id: 0, x: tx, z: tz, scale });
     }
   }
-  open.forEach((t, i) => (t.id = i));
-  return open;
+  // Clear the lift lines, the stations and the cat tracks.
+  const clear = open.filter((t) => !CAT_TRACKS.some((c) => nearTrack(c, t.x, t.z).d < c.halfWidth + FOREST.roadClearing) && !LIFTS.some((l) => {
+    const dx = t.x - l.bottom[0];
+    const dz = t.z - l.bottom[1];
+    const s = dx * l.dir.x + dz * l.dir.z;
+    const across = Math.abs(dx * l.dir.z - dz * l.dir.x);
+    const nearStation = Math.min(Math.hypot(dx, dz), Math.hypot(t.x - l.top[0], t.z - l.top[1]), Math.hypot(t.x - l.unload[0], t.z - l.unload[1]));
+    return nearStation < FOREST.stationClearing || (s > 0 && s < l.length && across < FOREST.liftClearing);
+  }));
+  clear.forEach((t, i) => (t.id = i));
+  return clear;
 }
 
 /** The forest beyond Kettle Run's banks. */
@@ -78,6 +88,10 @@ const FOREST = {
   farDensity: 0.3,
   /** Snow normal's up component below which it's rock, not forest (about 42 degrees). */
   steepest: 0.74,
+  /** Cleared swaths: either side of a lift line, around its stations, and beside a cat track. */
+  liftClearing: 7,
+  stationClearing: 16,
+  roadClearing: 3,
 };
 
 export const TREES: readonly Tree[] = generate();

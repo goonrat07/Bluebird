@@ -12,6 +12,10 @@ declare global {
       command: (c: Command) => void;
       setAssist: (level: AssistLevel) => void;
       teleport: (z: number, u?: number, speed?: number, run?: string) => void;
+      /** Puts the rider at a point on the mountain, standing still and facing downhill. */
+      placeAt: (x: number, z: number) => void;
+      /** Jumps a lift ride along to a fraction of the way up (play tests only). */
+      liftProgress: (f: number) => void;
     };
   }
 }
@@ -25,4 +29,6 @@ window.__game = {
   command: (c) => game.command(c),
   setAssist: (level) => game.setAssist(level),
   teleport: (z, u, speed, run) => game.teleport(z, u, speed, run),
+  placeAt: (x, z) => game.placeAt(x, z),
+  liftProgress: (f) => game.liftProgress(f),
 };

@@ -134,6 +134,53 @@ test('the rest of Kettle Peak', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('lifts, the cat track and the trail map', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  await load(page, errors);
+  const frames = async (n: number) => {
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction(([f, n]) => window.__game!.telemetry().frame > f + n, [f, n]);
+  };
+  // Stop at the bottom of the Kettle Express and get on.
+  await page.evaluate(() => window.__game!.placeAt(-45.7, 1493));
+  await frames(5);
+  expect((await telemetry(page)).canBoard).toBe('Kettle Express');
+  await page.screenshot({ path: 'test/artifacts/lift-base.png' });
+  await page.keyboard.press('KeyE');
+  await page.waitForFunction(() => window.__game!.telemetry().lift !== null);
+  await page.evaluate(() => window.__game!.liftProgress(0.45));
+  await frames(5);
+  const riding = await telemetry(page);
+  expect(riding.lift!.name).toBe('Kettle Express');
+  await page.screenshot({ path: 'test/artifacts/lift-riding.png' });
+  // Hurry to the top and get set down on the snow.
+  await page.evaluate(() => window.__game!.liftProgress(0.995));
+  await page.keyboard.down('KeyW');
+  await page.waitForFunction(() => window.__game!.telemetry().lift === null, null, { timeout: 60_000 });
+  await page.keyboard.up('KeyW');
+  const top = await telemetry(page);
+  expect(top.grounded).toBe(true);
+  expect(Math.hypot(top.pos.x + 30, top.pos.z - 2)).toBeLessThan(6);
+  await frames(5);
+  await page.screenshot({ path: 'test/artifacts/lift-top.png' });
+
+  // Summit Road, partway down its switchbacks.
+  await page.evaluate(() => window.__game!.placeAt(-165, -315.5));
+  await frames(2);
+  expect((await telemetry(page)).snow).toBe('groomed');
+  await frames(8);
+  await page.screenshot({ path: 'test/artifacts/summit-road.png' });
+
+  // The trail map opens and closes with Tab.
+  await page.keyboard.press('Tab');
+  await frames(3);
+  await page.screenshot({ path: 'test/artifacts/trail-map.png' });
+  await page.keyboard.press('Tab');
+  expect(await page.locator('#map').isHidden()).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test('riding the glade builds Flow', async ({ page }) => {
   test.setTimeout(180_000); // the glade is the heaviest view for a software renderer
   const errors: string[] = [];

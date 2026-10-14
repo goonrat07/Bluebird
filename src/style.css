@@ -92,3 +92,17 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8d6; }
 #tuning summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
 #tuning label { display: grid; grid-template-columns: 1fr 110px 52px; align-items: center; gap: 6px; padding: 1px 0; }
 #tuning output { text-align: right; font-variant-numeric: tabular-nums; }
+
+#prompt {
+  position: absolute; left: 50%; bottom: 34%; transform: translateX(-50%);
+  font-size: 15px; letter-spacing: 0.02em; opacity: 0; transition: opacity 0.2s;
+}
+#prompt.on { opacity: 1; }
+#prompt b {
+  display: inline-block; min-width: 1.4em; padding: 0 0.35em; margin-right: 0.3em; text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 4px; text-shadow: none;
+}
+#map {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 5;
+}
+#map[hidden] { display: none; }

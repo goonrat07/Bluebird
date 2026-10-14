@@ -24,6 +24,8 @@ export class Hud {
   private readonly eventBox = document.getElementById('event')!;
   private readonly countdown = document.getElementById('countdown')!;
   private readonly result = document.getElementById('result')!;
+  private readonly prompt = document.getElementById('prompt')!;
+  private promptKey = '';
   private eventKey = '';
   private trickTimer = 0;
   private balanceShown = 0;
@@ -54,6 +56,19 @@ export class Hud {
     // Positive balance tips left, so the marker moves left.
     this.balanceMark.style.transform = `translateX(${(-this.balanceShown * 100).toFixed(1)}px)`;
     this.balance.classList.toggle('danger', Math.abs(balance) > 0.7);
+  }
+
+  /** A quiet line near the bottom: what E would do here, or the lift you're riding. */
+  updateLift(riding: { name: string; progress: number } | null, canBoard: string | null): void {
+    const text = riding
+      ? `${riding.name} · ${Math.round(riding.progress * 100)}% · hold W to hurry`
+      : canBoard
+        ? `<b>E</b> ride the ${canBoard}`
+        : '';
+    if (text === this.promptKey) return;
+    this.promptKey = text;
+    this.prompt.innerHTML = text;
+    this.prompt.classList.toggle('on', text !== '');
   }
 
   /** Event name and live clock or score up top, a big countdown, and the result card at the end. */

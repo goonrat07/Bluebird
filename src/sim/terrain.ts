@@ -355,7 +355,7 @@ for (const spec of SPECS) {
 export const RUNS: readonly RunInfo[] = [KETTLE, ...OTHERS];
 
 /** Height of the mountain between runs above the runs nearby, and how it rises away from them. */
-const MOUNTAIN = { lift: 12, rise: 0.3, smooth: 4 };
+const MOUNTAIN = { lift: 12, rise: 0.15, smooth: 4 };
 
 /** The forested mountain surface: blended from the runs nearby, a little above them. */
 function mountain(x: number, z: number): number {
@@ -380,7 +380,8 @@ function smin(a: number, b: number, k: number): number {
 /** Kettle Run's snow is kept exactly as designed this far in from its edges; the branches open up beyond. */
 const KETTLE_KEEP = { inset: 10, below: KETTLE_TOP + 20 };
 
-export function heightAt(x: number, z: number): number {
+/** The mountain before any cat track is cut into it. */
+export function naturalHeight(x: number, z: number): number {
   const kettle = kettleSurface(x, z);
   let h = kettle;
   for (const r of OTHERS) {
@@ -393,6 +394,136 @@ export function heightAt(x: number, z: number): number {
   const keep = RUN.halfWidth - KETTLE_KEEP.inset;
   const t = Math.min(1, Math.max(0, (Math.abs(lateral(x, z)) - keep) / KETTLE_KEEP.inset));
   return kettle + (h - kettle) * smooth(t);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Cat tracks: narrow groomed roads benched into the mountain at an easy grade, for getting
+// around without riding the steep stuff. Each is a polyline; its snow is a flat bench that
+// cuts into the slope above and fills below, blending back into the mountain at its shoulders.
+
+export interface CatTrack {
+  name: string;
+  /** Corners of the road, top to bottom (x, z). */
+  points: readonly [number, number][];
+  halfWidth: number;
+  /** Distance along the road at each corner. */
+  along: number[];
+  /** Road height every CAT.step metres along it. */
+  profile: Float64Array;
+}
+
+const CAT = { halfWidth: 4, shoulder: 8, crown: 0.15, step: 2, smoothing: 30, endBlend: 150 };
+
+/** Height of a cat track at distance s along it. */
+function roadHeight(t: CatTrack, s: number): number {
+  const f = Math.min(Math.max(s / CAT.step, 0), t.profile.length - 1.000001);
+  const i = Math.floor(f);
+  return t.profile[i] + (t.profile[i + 1] - t.profile[i]) * (f - i);
+}
+
+function catTrack(name: string, points: [number, number][], endOn: (x: number, z: number) => number): CatTrack {
+  const along = [0];
+  for (let i = 1; i < points.length; i++) {
+    along.push(along[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]));
+  }
+  const total = along[along.length - 1];
+  const at = (s: number): [number, number] => {
+    let i = 1;
+    while (i < along.length - 1 && along[i] < s) i++;
+    const f = (s - along[i - 1]) / (along[i] - along[i - 1]);
+    return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * f, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * f];
+  };
+  // The road follows the mountain under its centerline, smoothed so it never kinks, and eases
+  // onto the run it ends on.
+  const n = Math.ceil(total / CAT.step) + 1;
+  let h = Float64Array.from({ length: n }, (_, i) => naturalHeight(...at(Math.min(total, i * CAT.step))));
+  const r = Math.round(CAT.smoothing / CAT.step);
+  for (let pass = 0; pass < 3; pass++) {
+    h = h.map((_, i) => {
+      let sum = 0;
+      let count = 0;
+      for (let j = Math.max(0, i - r); j <= Math.min(n - 1, i + r); j++, count++) sum += h[j];
+      return sum / count;
+    });
+  }
+  const end = endOn(...points[points.length - 1]);
+  for (let i = 0; i < n; i++) {
+    const w = smooth(Math.max(0, 1 - (total - i * CAT.step) / CAT.endBlend));
+    h[i] += (end - h[n - 1]) * w;
+  }
+  return { name, points, halfWidth: CAT.halfWidth, along, profile: h };
+}
+
+/** Where a point is relative to a cat track: distance from its centerline, distance along it, and the road height there. */
+export function nearTrack(t: CatTrack, x: number, z: number): { d: number; s: number; h: number } {
+  let best = { d: Infinity, s: 0, h: 0 };
+  for (let i = 1; i < t.points.length; i++) {
+    const [x0, z0] = t.points[i - 1];
+    const [x1, z1] = t.points[i];
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const len2 = dx * dx + dz * dz;
+    const f = Math.min(1, Math.max(0, ((x - x0) * dx + (z - z0) * dz) / len2));
+    const d = Math.hypot(x - (x0 + dx * f), z - (z0 + dz * f));
+    if (d < best.d) {
+      best = { d, s: t.along[i - 1] + f * Math.sqrt(len2), h: 0 };
+    }
+  }
+  best.h = roadHeight(t, best.s);
+  return best;
+}
+
+/**
+ * Summit Road: along the summit, then switchbacks down the forest on the skier's right of the
+ * couloir, and a long traverse into Kettle Run below its top. The easy way down from the summit.
+ */
+export const CAT_TRACKS: readonly CatTrack[] = [
+  catTrack(
+    'Summit Road',
+    [
+      [-10, -448],
+      [-230, -436],
+      [-90, -374],
+      [-240, -328],
+      [-90, -303],
+      [-240, -257],
+      [-90, -235],
+      [-240, -172],
+      [-90, -152],
+      [-240, 97],
+      [-58, 117],
+    ],
+    kettleSurface,
+  ),
+];
+
+const CAT_BOX = (() => {
+  const xs = CAT_TRACKS.flatMap((t) => t.points.map((p) => p[0]));
+  const zs = CAT_TRACKS.flatMap((t) => t.points.map((p) => p[1]));
+  const pad = CAT.halfWidth + CAT.shoulder;
+  return { x0: Math.min(...xs) - pad, x1: Math.max(...xs) + pad, z0: Math.min(...zs) - pad, z1: Math.max(...zs) + pad };
+})();
+
+/** The cat track a point is on (within its groomed width), if any. */
+export function catTrackAt(x: number, z: number): CatTrack | null {
+  if (x < CAT_BOX.x0 || x > CAT_BOX.x1 || z < CAT_BOX.z0 || z > CAT_BOX.z1) return null;
+  for (const t of CAT_TRACKS) if (nearTrack(t, x, z).d <= t.halfWidth) return t;
+  return null;
+}
+
+export function heightAt(x: number, z: number): number {
+  const h = naturalHeight(x, z);
+  if (x < CAT_BOX.x0 || x > CAT_BOX.x1 || z < CAT_BOX.z0 || z > CAT_BOX.z1) return h;
+  let out = h;
+  for (const t of CAT_TRACKS) {
+    const { d, h: road } = nearTrack(t, x, z);
+    if (d >= t.halfWidth + CAT.shoulder) continue;
+    // A slight crown so the road sheds toward its edges, then cut or fill back to the mountain.
+    const bench = road - CAT.crown * Math.min(1, d / t.halfWidth);
+    const w = 1 - smooth(Math.max(0, d - t.halfWidth) / CAT.shoulder);
+    out = out + (bench - out) * w;
+  }
+  return out;
 }
 
 /** The run a point is on or nearest to, and how far across it the point is. */
@@ -436,6 +567,7 @@ export function isNearLip(x: number, z: number): boolean {
 }
 
 export function snowAt(x: number, z: number): SnowType {
+  if (catTrackAt(x, z)) return 'groomed';
   const { run, u } = runAt(x, z);
   if (Math.abs(u) > run.groomedHalfWidth) return 'powder';
   // Icy patches on the skier's right of Kettle Run's groomer, scraped off on the steeper pitches.

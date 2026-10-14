@@ -16,10 +16,13 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `src/sim/tuning.ts` – every number that shapes riding feel. No magic numbers in rider code.
 - `src/render/` – three.js drawing only; reads sim state, never changes it.
 - `src/game.ts` – fixed 120 Hz step with interpolated rendering.
-- `window.__game` – debug hook for play tests (`ready`, `telemetry()`, `command()`, `setAssist()`, `teleport(z, u)`).
+- `window.__game` – debug hook for play tests (`ready`, `telemetry()`, `command()`, `setAssist()`, `teleport(z, u)`, `placeAt(x, z)`, `liftProgress(f)`).
 - `src/sim/terrain.ts` – Kettle Peak. Kettle Run (pitch profile, winding centerline, kickers; measure across it with `lateral()`)
   plus the other runs in `RUNS` (Cornice Chute, Kettle Couloir, Raven's Drop, Fernwood), each a valley along its own centerline,
   blended into a forested mountain. Kettle's snow inside its corridor must stay exactly as it is; `runAt()` finds the run under a point.
+- `CAT_TRACKS` in `terrain.ts` – Summit Road, a groomed bench cut into the mountain; it overrides the snow within its shoulders.
+- `src/sim/lifts.ts` – chairlifts (Kettle Express, Summit Chair): towers, cable, boarding (E), riding (hold W to hurry), unloading.
+  Lifts are freeride only and never part of an event or replay. Drawn by `src/render/lifts.ts`; `src/ui/trailMap.ts` is the Tab map.
 - `src/render/mountain.ts` – the terrain mesh: a fine ribbon per run plus a coarser forest grid and far apron, all in culled chunks.
 - `src/render/presets/` – time-of-day light presets (T cycles in game).
 - `src/sim/rails.ts` – park rails and boxes; grinding lives in `rider.ts`.
