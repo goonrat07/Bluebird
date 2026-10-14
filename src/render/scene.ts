@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RUN, centerX, heightAt, inGlade } from '../sim/terrain';
 import { buildMountain } from './mountain';
-import { TREES, treeBaseY } from '../sim/trees';
+import { TREES, type Tree, treeBaseY } from '../sim/trees';
 import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
 import { buildPark } from './park';
@@ -88,7 +88,7 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), this.forest, this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
@@ -147,6 +147,8 @@ export class SceneView {
   }
 
   /** Draws one frame. `snap` jumps the camera into place instead of easing (used after a reset). */
+  private readonly forest = buildTrees();
+
   render(v: FrameView, dt: number, snap = false): void {
     this.rider.root.position.set(v.pos.x, v.pos.y, v.pos.z);
     this.rider.update(v, dt);
@@ -160,6 +162,8 @@ export class SceneView {
     // The shadow box follows the rider; the sun keeps its direction.
     this.sun.target.position.copy(at);
     this.sun.position.copy(at).addScaledVector(this.sunDir, 200);
+    // Forest patches far past the fog are skipped; the snow beneath them still reads at that distance.
+    for (const patch of this.forest.children) patch.visible = patch.position.distanceTo(this.camera.position) < FOREST_DRAW + TREE_PATCH;
     this.time += dt;
     this.post.render(this.time);
   }
@@ -230,7 +234,7 @@ function buildFinish(): THREE.Group {
   return g;
 }
 
-function buildTrees(): THREE.Object3D[] {
+function buildTrees(): THREE.Group {
   // Dark evergreen crowns carrying a load of snow on each tier.
   const crownGeo = new THREE.ConeGeometry(1.4, 5, 7);
   crownGeo.translate(0, 3.5, 0);
@@ -242,22 +246,48 @@ function buildTrees(): THREE.Object3D[] {
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.28, 1.2, 6);
   trunkGeo.translate(0, 0.6, 0);
   const flat = (color: number) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.95 });
-  const crowns = new THREE.InstancedMesh(crownGeo, flat(0x3f6657), TREES.length);
-  const caps = new THREE.InstancedMesh(capGeo, flat(0xf3f1ef), TREES.length);
-  const trunks = new THREE.InstancedMesh(trunkGeo, flat(0x5a4038), TREES.length);
-  crowns.castShadow = caps.castShadow = true;
+  const crownMat = flat(0x3f6657);
+  const capMat = flat(0xf3f1ef);
+  const trunkMat = flat(0x5a4038);
+  // The forest is split into square patches so patches out of view (and out of the shadow map) are skipped.
+  const patches = new Map<string, Tree[]>();
+  for (const t of TREES) {
+    const key = `${Math.floor(t.x / TREE_PATCH)},${Math.floor(t.z / TREE_PATCH)}`;
+    const list = patches.get(key);
+    if (list) list.push(t);
+    else patches.set(key, [t]);
+  }
+  const forest = new THREE.Group();
   const m = new THREE.Matrix4();
   const spin = new THREE.Matrix4();
-  TREES.forEach((t, i) => {
-    // A little random rotation and squash so the forest doesn't look stamped.
-    spin.makeRotationY((t.x * 12.9898 + t.z * 78.233) % (Math.PI * 2));
-    m.makeScale(t.scale, t.scale * (0.9 + ((t.x * 7.1 + t.z) % 1 + 1) % 1 * 0.25), t.scale).premultiply(spin).setPosition(t.x, treeBaseY(t), t.z);
-    crowns.setMatrixAt(i, m);
-    caps.setMatrixAt(i, m);
-    trunks.setMatrixAt(i, m);
-  });
-  return [crowns, caps, trunks];
+  for (const [key, trees] of patches) {
+    // Each patch is a group placed at its centre, so it can be shown or hidden by distance.
+    const [px, pz] = key.split(',').map((n) => (Number(n) + 0.5) * TREE_PATCH);
+    const patch = new THREE.Group();
+    patch.position.set(px, heightAt(px, pz), pz);
+    const crowns = new THREE.InstancedMesh(crownGeo, crownMat, trees.length);
+    const caps = new THREE.InstancedMesh(capGeo, capMat, trees.length);
+    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, trees.length);
+    crowns.castShadow = caps.castShadow = true;
+    trees.forEach((t, i) => {
+      // A little random rotation and squash so the forest doesn't look stamped.
+      spin.makeRotationY((t.x * 12.9898 + t.z * 78.233) % (Math.PI * 2));
+      m.makeScale(t.scale, t.scale * (0.9 + ((t.x * 7.1 + t.z) % 1 + 1) % 1 * 0.25), t.scale).premultiply(spin).setPosition(t.x - px, treeBaseY(t) - patch.position.y, t.z - pz);
+      crowns.setMatrixAt(i, m);
+      caps.setMatrixAt(i, m);
+      trunks.setMatrixAt(i, m);
+    });
+    for (const mesh of [crowns, caps, trunks]) mesh.computeBoundingSphere();
+    patch.add(crowns, caps, trunks);
+    forest.add(patch);
+  }
+  return forest;
 }
+
+/** Size (m) of each square patch of forest drawn together. */
+const TREE_PATCH = 120;
+/** Forest is drawn out to about this far from the camera (m). */
+const FOREST_DRAW = 450;
 
 /** Crown radius at height y (the crown is a cone from y = 1 to y = 6 with base radius 1.4). */
 const crownRadius = (y: number): number => Math.max(0, (1.4 * (6 - y)) / 5);
