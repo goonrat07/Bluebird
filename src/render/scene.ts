@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { RUN, centerX, heightAt, inGlade, isNearLip, onKicker, snowAt } from '../sim/terrain';
+import { RUN, centerX, heightAt, inGlade } from '../sim/terrain';
+import { buildMountain } from './mountain';
 import { TREES, treeBaseY } from '../sim/trees';
-import type { SnowType } from '../sim/tuning';
 import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
 import { buildPark } from './park';
@@ -26,15 +26,6 @@ export interface FrameView extends RiderPose {
   /** On a rail or box: no tracks or spray in the snow. */
   grinding: boolean;
 }
-
-// Per-snow-type tint on top of the preset's snow color: ice is glassy blue-gray, groomed a touch duller than powder.
-const SNOW_TINTS: Record<SnowType, THREE.Color> = {
-  groomed: new THREE.Color(0.95, 0.95, 0.96),
-  powder: new THREE.Color(1, 1, 1),
-  ice: new THREE.Color(0.78, 0.85, 0.95),
-};
-const KICKER_TINT = new THREE.Color(0.86, 0.89, 0.97);
-const LIP_TINT = new THREE.Color(0.55, 0.65, 0.88);
 
 export const CAMERA = {
   /** Metres behind the rider at a standstill, plus more with speed. */
@@ -97,7 +88,7 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildMountain(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
@@ -215,53 +206,6 @@ export class SceneView {
       this.camera.updateProjectionMatrix();
     }
   }
-}
-
-function buildSlope(material: THREE.Material): THREE.Mesh {
-  // A grid laid along the run's centerline: rows down the hill, columns across it.
-  const U = 95;
-  const cols = 150;
-  const z0 = -120;
-  const z1 = RUN.length + 260;
-  const rows = 1250;
-  const positions = new Float32Array((rows + 1) * (cols + 1) * 3);
-  const colors = new Float32Array((rows + 1) * (cols + 1) * 3);
-  const c = new THREE.Color();
-  for (let r = 0; r <= rows; r++) {
-    const z = z0 + ((z1 - z0) * r) / rows;
-    const cx = centerX(z);
-    for (let k = 0; k <= cols; k++) {
-      const u = -U + (2 * U * k) / cols;
-      const x = cx + u;
-      const i = r * (cols + 1) + k;
-      positions.set([x, heightAt(x, z), z], i * 3);
-      c.copy(SNOW_TINTS[snowAt(x, z)]);
-      // Soft wind-carved variation so big sunlit faces aren't one flat color.
-      const wind = 1 - 0.035 * (Math.sin(x * 0.21 + z * 0.13) * Math.sin(z * 0.37 - x * 0.05) + 1);
-      c.multiplyScalar(wind);
-      if (onKicker(x, z)) c.multiply(KICKER_TINT);
-      if (isNearLip(x, z)) c.copy(LIP_TINT); // mark the lip so it's easy to time the pop
-      colors.set([c.r, c.g, c.b], i * 3);
-    }
-  }
-  const index: number[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let k = 0; k < cols; k++) {
-      const a = r * (cols + 1) + k;
-      const b = a + 1;
-      const d = a + cols + 1;
-      const e = d + 1;
-      index.push(a, d, b, b, d, e); // counter-clockwise from above, so normals face up
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.setIndex(index);
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, material);
-  mesh.receiveShadow = true;
-  return mesh;
 }
 
 /** A simple finish banner across the run at the bottom of the Kettle Wall. */

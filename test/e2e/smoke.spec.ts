@@ -109,6 +109,28 @@ test('landmarks down Kettle Run', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('the rest of Kettle Peak', async ({ page }) => {
+  test.setTimeout(300_000); // six spots, each drawn in software GL
+  const errors: string[] = [];
+  await load(page, errors);
+  // A spot on each of the other runs, and one looking across from Kettle at a branch.
+  const spots: [string, string, number, number][] = [
+    ['cornice', 'cornice', -330, 0],
+    ['couloir', 'couloir', -300, 0],
+    ['raven-traverse', 'raven', 300, 0],
+    ['raven-face', 'raven', 490, 0],
+    ['fernwood', 'fernwood', 1050, 0],
+    ['fernwood-base', 'fernwood', 1420, 0],
+  ];
+  for (const [name, run, z, u] of spots) {
+    await page.evaluate(([run, z, u]) => window.__game!.teleport(z as number, u as number, 6, run as string), [run, z, u]);
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 10, f);
+    await page.screenshot({ path: `test/artifacts/peak-${name}.png` });
+  }
+  expect(errors).toEqual([]);
+});
+
 test('riding the glade builds Flow', async ({ page }) => {
   test.setTimeout(180_000); // the glade is the heaviest view for a software renderer
   const errors: string[] = [];

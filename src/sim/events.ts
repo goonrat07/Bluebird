@@ -1,5 +1,5 @@
 import { type RiderState, createRider, stepRider } from './rider';
-import { RUN, centerX, heightAt, lateral } from './terrain';
+import { RUN, RUNS, centerX, heightAt, lateral } from './terrain';
 import { WORLD, type AssistLevel, type Sport } from './tuning';
 import type { RideInput } from './input';
 import { type Recording, decodeInput, encodeInput, physicsVersion } from './replay';
@@ -77,8 +77,9 @@ export interface EventRun {
 }
 
 /** Puts a rider at distance z down the run, u metres off the centerline, moving downhill along the snow. */
-export function placeRider(r: RiderState, z: number, u: number, speed: number): void {
-  const x = centerX(z) + u;
+export function placeRider(r: RiderState, z: number, u: number, speed: number, run = 'kettle'): void {
+  const line = RUNS.find((r) => r.id === run);
+  const x = (line ? line.centerX(z) : centerX(z)) + u;
   r.pos = { x, y: heightAt(x, z), z };
   const drop = heightAt(x, z + 1) - heightAt(x, z);
   const along = Math.hypot(1, drop);

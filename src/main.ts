@@ -11,7 +11,7 @@ declare global {
       telemetry: () => Telemetry;
       command: (c: Command) => void;
       setAssist: (level: AssistLevel) => void;
-      teleport: (z: number, u?: number, speed?: number) => void;
+      teleport: (z: number, u?: number, speed?: number, run?: string) => void;
     };
   }
 }
@@ -24,5 +24,5 @@ window.__game = {
   telemetry: () => game.telemetry(),
   command: (c) => game.command(c),
   setAssist: (level) => game.setAssist(level),
-  teleport: (z, u, speed) => game.teleport(z, u, speed),
+  teleport: (z, u, speed, run) => game.teleport(z, u, speed, run),
 };
