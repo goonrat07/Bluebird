@@ -127,12 +127,20 @@ export interface AssistTuning {
   rotationSnapDeg: number;
   /** How hard gap sense nudges you toward the open gap you're heading for (rad/s at full strength; 0 = off). */
   gapSense: number;
+  /** How far beside a rail (m) you can be and still lock on. */
+  railSnap: number;
+  /** How far off straight or sideways (degrees) you can be and still lock on. */
+  railAngleDeg: number;
+  /** Strength of the wobble you balance against on a rail, and how fast an off-centre lean grows (1 = full). */
+  railWobble: number;
+  /** Losing balance on a rail is a crash rather than slipping off. */
+  railFallCrash: boolean;
 }
 
 export const ASSIST: Record<AssistLevel, AssistTuning> = {
-  relaxed: { surviveDeg: 55, cleanDeg: 25, grabLandingOk: true, rotationSnapDeg: 100, gapSense: 1.4 },
-  normal: { surviveDeg: 35, cleanDeg: 15, grabLandingOk: false, rotationSnapDeg: 70, gapSense: 1.1 },
-  real: { surviveDeg: 20, cleanDeg: 8, grabLandingOk: false, rotationSnapDeg: 0, gapSense: 0 },
+  relaxed: { surviveDeg: 55, cleanDeg: 25, grabLandingOk: true, rotationSnapDeg: 100, gapSense: 1.4, railSnap: 1.1, railAngleDeg: 50, railWobble: 0.45, railFallCrash: false },
+  normal: { surviveDeg: 35, cleanDeg: 15, grabLandingOk: false, rotationSnapDeg: 70, gapSense: 1.1, railSnap: 0.8, railAngleDeg: 38, railWobble: 0.75, railFallCrash: false },
+  real: { surviveDeg: 20, cleanDeg: 8, grabLandingOk: false, rotationSnapDeg: 0, gapSense: 0, railSnap: 0.5, railAngleDeg: 25, railWobble: 1, railFallCrash: true },
 };
 
 export const CRASH = {
@@ -180,4 +188,34 @@ export const GAP = {
   lookMax: 16,
   /** Extra clearance (m) it aims to leave beside a trunk. */
   margin: 0.6,
+};
+
+/** Rails and boxes: lock on by landing or riding onto them, then balance with A/D. */
+export const RAIL = {
+  /** Friction along a rail (boxes are a bit grabbier). */
+  railFriction: 0.05,
+  boxFriction: 0.08,
+  /** How far below a rail's top you can ride onto it without popping (m): boxes only. */
+  stepUp: 0.45,
+  /** How fast leaning off-centre grows on its own (1/s²): the instability you correct for. */
+  tip: 6,
+  /** Push from A/D to correct balance (balance units/s²). */
+  correct: 8,
+  /** Damping of the balance wobble (1/s). */
+  damping: 1.5,
+  /** Size of the wobble you fight at 10 m/s; it grows with speed. */
+  wobble: 1.6,
+  /** Little hop (m/s) off the end of a rail, so the rider clears it instead of scraping off. */
+  exitPop: 1.6,
+  /** Sideways speed (m/s) when slipping off a rail after losing balance. */
+  slipSpeed: 2.5,
+  /** Shortest grind (s) that scores. */
+  minTime: 0.25,
+  /** Extra friction on a sideways slide compared with a 50-50. */
+  slideFriction: 1.5,
+  /** Points per second of grinding, and the multiplier for sideways slides. */
+  pointsPerSecond: 160,
+  slideBonus: 1.4,
+  /** Below this speed you stall on the rail and drop off. */
+  stallSpeed: 1.2,
 };

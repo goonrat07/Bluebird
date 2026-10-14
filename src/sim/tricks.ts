@@ -1,4 +1,4 @@
-import type { Sport } from './tuning';
+import { RAIL, type Sport } from './tuning';
 
 export type GrabDir = 'none' | 'up' | 'down' | 'left' | 'right';
 export type LandingQuality = 'clean' | 'solid' | 'sketchy';
@@ -20,6 +20,8 @@ export interface AirLog {
   grabTime: number;
   airTime: number;
   switchTakeoff: boolean;
+  /** The grind this jump came off, if any; it joins whatever is done in the air. */
+  rail: Trick | null;
 }
 
 export interface Trick {
@@ -57,4 +59,21 @@ export function scoreTrick(sport: Sport, log: AirLog, quality: LandingQuality): 
 
   const base = 100 * halfTurns + 450 * flips + (grabbed ? Math.min(600, 150 + log.grabTime * 300) : 0) + 60 * log.airTime;
   return { name: parts.join(' '), score: Math.round(base * QUALITY_MULT[quality]), quality };
+}
+
+const worse = (a: LandingQuality, b: LandingQuality): LandingQuality =>
+  a === 'sketchy' || b === 'sketchy' ? 'sketchy' : a === 'solid' || b === 'solid' ? 'solid' : 'clean';
+
+/** Names and scores a grind from how long it lasted and how close to falling off the rider got. */
+export function scoreGrind(sport: Sport, slide: boolean, time: number, worstBalance: number): Trick {
+  const name = slide ? (sport === 'board' ? 'Boardslide' : 'Rail Slide') : '50-50';
+  const quality: LandingQuality = worstBalance < 0.5 ? 'clean' : worstBalance < 0.8 ? 'solid' : 'sketchy';
+  const score = RAIL.pointsPerSecond * time * (slide ? RAIL.slideBonus : 1) * QUALITY_MULT[quality];
+  return { name, score: Math.round(score), quality };
+}
+
+/** A grind followed by whatever was done off the end ("Boardslide to Backside 180"). */
+export function joinTricks(rail: Trick, air: Trick | null, landing: LandingQuality): Trick {
+  if (!air) return { ...rail, quality: worse(rail.quality, landing) };
+  return { name: `${rail.name} to ${air.name}`, score: rail.score + air.score, quality: worse(rail.quality, air.quality) };
 }
