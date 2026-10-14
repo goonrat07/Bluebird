@@ -1,4 +1,6 @@
 import { AIR, ASSIST, CRASH, RIDE, SNOW, SPORTS } from '../sim/tuning';
+import { CAMERA } from '../render/scene';
+import { BODY } from '../render/riderModel';
 
 type NumberTable = Record<string, number | boolean>;
 
@@ -15,6 +17,8 @@ const GROUPS: [string, NumberTable][] = [
   ['Assist: normal', ASSIST.normal as unknown as NumberTable],
   ['Assist: real', ASSIST.real as unknown as NumberTable],
   ['Crashes', CRASH as unknown as NumberTable],
+  ['Camera', CAMERA as unknown as NumberTable],
+  ['Body animation', BODY as unknown as NumberTable],
 ];
 
 const DEFAULTS = JSON.stringify(GROUPS.map(([, t]) => t));
