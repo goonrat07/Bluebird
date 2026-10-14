@@ -5,6 +5,12 @@ import type { SnowType } from '../sim/tuning';
 import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
 import { Spray } from './spray';
+import { PRESETS, type LightPreset } from './presets';
+import { Sky } from './sky';
+import { buildPeaks, tintPeaks } from './peaks';
+import { createSnowMaterial } from './snowMaterial';
+import { Trails } from './trails';
+import { PostEffects } from './post';
 
 export interface FrameView extends RiderPose {
   pos: Vec3;
@@ -12,14 +18,18 @@ export interface FrameView extends RiderPose {
   skidding: boolean;
   /** True on the frame the rider touched down. */
   justLanded: boolean;
+  /** Riding through powder, where tracks are deeper. */
+  deepSnow: boolean;
 }
 
-const SNOW_COLORS: Record<SnowType, THREE.Color> = {
-  groomed: new THREE.Color(0xe6eaf0),
-  powder: new THREE.Color(0xf7fbff),
-  ice: new THREE.Color(0xb9cde0),
+// Per-snow-type tint on top of the preset's snow color: ice is glassy blue-gray, groomed a touch duller than powder.
+const SNOW_TINTS: Record<SnowType, THREE.Color> = {
+  groomed: new THREE.Color(0.95, 0.95, 0.96),
+  powder: new THREE.Color(1, 1, 1),
+  ice: new THREE.Color(0.78, 0.85, 0.95),
 };
-const KICKER_TINT = new THREE.Color(0xc9d6e8);
+const KICKER_TINT = new THREE.Color(0.86, 0.89, 0.97);
+const LIP_TINT = new THREE.Color(0.55, 0.65, 0.88);
 
 export const CAMERA = {
   /** Metres behind the rider at a standstill, plus more with speed. */
@@ -35,46 +45,90 @@ export const CAMERA = {
 
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
-// Gray-box look for the feel prototype; the real art direction arrives in Phase 2.
+// Mid-century ski poster meets low-poly: low warm sun, lavender shade, haze on distant peaks.
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2000);
   private readonly rider = new RiderModel();
   private readonly spray = new Spray();
-  private readonly sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
+  private readonly sun = new THREE.DirectionalLight(0xffffff, 3);
+  private readonly hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
+  private readonly sunDir = new THREE.Vector3();
+  private readonly sky = new Sky();
+  private readonly snow = createSnowMaterial();
+  private readonly peaks: THREE.Mesh;
+  private readonly trails = new Trails();
+  private readonly post: PostEffects;
   private readonly camPos = new THREE.Vector3();
   private readonly camLook = new THREE.Vector3();
   private camYaw = 0;
+  private presetIndex = 0;
+  private time = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
-    const sky = new THREE.Color(0x9fb8d6);
-    this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(sky, 120, 650);
-
-    this.scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x8a8f99, 1.1));
+    this.scene.fog = new THREE.FogExp2(0xffffff, 0.001);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.02;
     const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -40;
-    sc.right = sc.top = 40;
-    sc.far = 250;
-    this.scene.add(this.sun, this.sun.target);
+    sc.left = sc.bottom = -45;
+    sc.right = sc.top = 45;
+    sc.far = 500;
+    this.scene.add(this.hemi, this.sun, this.sun.target);
 
-    this.scene.add(buildSlope(), ...buildTrees(), this.rider.root, this.spray.points);
+    this.peaks = buildPeaks(new THREE.Vector3(0, -SLOPE.length * SLOPE.grade * 0.5, SLOPE.length * 0.5));
+    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), ...buildTrees(), this.trails.mesh, this.rider.root, this.spray.points);
+    this.post = new PostEffects(this.renderer, this.scene, this.camera);
+    this.applyPreset(PRESETS[0]);
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** Steps to the next time-of-day look (T key). */
+  cycleLight(): string {
+    this.presetIndex = (this.presetIndex + 1) % PRESETS.length;
+    this.applyPreset(PRESETS[this.presetIndex]);
+    return PRESETS[this.presetIndex].name;
+  }
+
+  clearTrails(): void {
+    this.trails.clear();
+  }
+
+  private applyPreset(p: LightPreset): void {
+    this.sunDir.set(
+      Math.sin(p.sunAzimuth) * Math.cos(p.sunElevation),
+      Math.sin(p.sunElevation),
+      Math.cos(p.sunAzimuth) * Math.cos(p.sunElevation),
+    );
+    this.sun.color.set(p.sunColor);
+    this.sun.intensity = p.sunIntensity;
+    this.hemi.color.set(p.skyLight);
+    this.hemi.groundColor.set(p.groundLight);
+    this.hemi.intensity = p.ambientIntensity;
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.set(p.fogColor);
+    fog.density = p.fogDensity;
+    this.snow.material.color.set(p.snow);
+    this.snow.setSparkle(p.sparkle);
+    this.renderer.toneMappingExposure = p.exposure;
+    this.sky.apply(p, this.sunDir);
+    tintPeaks(this.peaks, p.fogColor);
   }
 
   resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -86,10 +140,15 @@ export class SceneView {
     this.emitSpray(v);
     this.spray.update(dt);
     this.updateCamera(v, dt, snap);
+    this.sky.follow(this.camera);
+    const at = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z);
+    this.trails.update(at, v.heading, v.sport === 'board' ? 0.32 : 0.4, v.deepSnow, v.grounded && !v.crashed && v.speed > 1);
 
-    this.sun.position.set(v.pos.x - 40, v.pos.y + 80, v.pos.z - 30);
-    this.sun.target.position.set(v.pos.x, v.pos.y, v.pos.z);
-    this.renderer.render(this.scene, this.camera);
+    // The shadow box follows the rider; the sun keeps its direction.
+    this.sun.target.position.copy(at);
+    this.sun.position.copy(at).addScaledVector(this.sunDir, 200);
+    this.time += dt;
+    this.post.render(this.time);
   }
 
   private emitSpray(v: FrameView): void {
@@ -129,7 +188,7 @@ export class SceneView {
   }
 }
 
-function buildSlope(): THREE.Mesh {
+function buildSlope(material: THREE.Material): THREE.Mesh {
   const width = SLOPE.halfWidth * 2;
   const geo = new THREE.PlaneGeometry(width, SLOPE.length + 100, 140, 650);
   geo.rotateX(-Math.PI / 2);
@@ -141,31 +200,69 @@ function buildSlope(): THREE.Mesh {
     const x = p.getX(i);
     const z = p.getZ(i);
     p.setY(i, heightAt(x, z));
-    c.copy(SNOW_COLORS[snowAt(x, z)]);
-    if (heightAt(x, z) - heightAt(x + 8, z) > 0.5 && Math.abs(x) < 8) c.lerp(KICKER_TINT, 0.5);
-    if (isNearLip(x, z)) c.set(0x7f97b8); // mark the lip so it's easy to time the pop
+    c.copy(SNOW_TINTS[snowAt(x, z)]);
+    // Soft wind-carved variation so big sunlit faces aren't one flat color.
+    const wind = 1 - 0.035 * (Math.sin(x * 0.21 + z * 0.13) * Math.sin(z * 0.37 - x * 0.05) + 1);
+    c.multiplyScalar(wind);
+    if (heightAt(x, z) - heightAt(x + 8, z) > 0.5 && Math.abs(x) < 8) c.multiply(KICKER_TINT);
+    if (isNearLip(x, z)) c.copy(LIP_TINT); // mark the lip so it's easy to time the pop
     colors.set([c.r, c.g, c.b], i * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+  const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
   return mesh;
 }
 
 function buildTrees(): THREE.Object3D[] {
+  // Dark evergreen crowns carrying a load of snow on each tier.
   const crownGeo = new THREE.ConeGeometry(1.4, 5, 7);
   crownGeo.translate(0, 3.5, 0);
+  // Snow sits as a cap on top and in bands on the lower tiers, just outside the crown's surface.
+  const capGeo = mergeBands([
+    [4.2, 6.05],
+    [2.7, 3.0],
+  ]);
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.28, 1.2, 6);
   trunkGeo.translate(0, 0.6, 0);
-  const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: 0x3f5a4a, flatShading: true }), TREES.length);
-  const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x5a4636 }), TREES.length);
-  crowns.castShadow = true;
+  const flat = (color: number) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.95 });
+  const crowns = new THREE.InstancedMesh(crownGeo, flat(0x37594e), TREES.length);
+  const caps = new THREE.InstancedMesh(capGeo, flat(0xf3f1ef), TREES.length);
+  const trunks = new THREE.InstancedMesh(trunkGeo, flat(0x5a4038), TREES.length);
+  crowns.castShadow = caps.castShadow = true;
   const m = new THREE.Matrix4();
+  const spin = new THREE.Matrix4();
   TREES.forEach((t, i) => {
-    m.makeScale(t.scale, t.scale, t.scale).setPosition(t.x, treeBaseY(t), t.z);
+    // A little random rotation and squash so the forest doesn't look stamped.
+    spin.makeRotationY((t.x * 12.9898 + t.z * 78.233) % (Math.PI * 2));
+    m.makeScale(t.scale, t.scale * (0.9 + ((t.x * 7.1 + t.z) % 1 + 1) % 1 * 0.25), t.scale).premultiply(spin).setPosition(t.x, treeBaseY(t), t.z);
     crowns.setMatrixAt(i, m);
+    caps.setMatrixAt(i, m);
     trunks.setMatrixAt(i, m);
   });
-  return [crowns, trunks];
+  return [crowns, caps, trunks];
+}
+
+/** Crown radius at height y (the crown is a cone from y = 1 to y = 6 with base radius 1.4). */
+const crownRadius = (y: number): number => Math.max(0, (1.4 * (6 - y)) / 5);
+
+/** Open bands hugging the crown between pairs of heights, merged into one geometry. */
+function mergeBands(bands: [number, number][]): THREE.BufferGeometry {
+  const parts = bands.map(([y0, y1]) => {
+    const g = new THREE.CylinderGeometry(crownRadius(y1) * 1.06, crownRadius(y0) * 1.06, y1 - y0, 7, 1, true).toNonIndexed();
+    g.translate(0, (y0 + y1) / 2, 0);
+    return g;
+  });
+  const count = parts.reduce((n, g) => n + g.attributes.position.count, 0);
+  const pos = new Float32Array(count * 3);
+  let o = 0;
+  for (const g of parts) {
+    pos.set(g.attributes.position.array as Float32Array, o);
+    o += g.attributes.position.array.length;
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  merged.computeVertexNormals();
+  return merged;
 }

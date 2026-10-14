@@ -28,13 +28,14 @@ const KEYMAP: Record<string, keyof RideInput> = {
 };
 
 /** One-shot actions that aren't held riding inputs. */
-export type Command = 'reset' | 'restart' | 'swapSport' | 'toggleTuning';
+export type Command = 'reset' | 'restart' | 'swapSport' | 'toggleTuning' | 'cycleLight';
 
 const COMMANDS: Record<string, Command> = {
   KeyR: 'reset',
   Backspace: 'restart',
   KeyF: 'swapSport',
   Backquote: 'toggleTuning',
+  KeyT: 'cycleLight',
 };
 
 export class Keyboard {
