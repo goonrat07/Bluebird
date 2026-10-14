@@ -152,11 +152,13 @@ describe('jumping and tricks', () => {
     expect(r.lastTrick?.name).toBe('Safety');
   });
 
-  it('holding a tuck off a jump does not start a flip', () => {
+  it('keys held through takeoff carry straight into a spin', () => {
     const r = cruising();
-    ride(0.5, () => ({ up: true, jump: true }), r);
-    ride(3, () => ({ up: true }), r);
-    expect(r.lastTrick?.name ?? 'Air').not.toMatch(/flip|Bail/);
+    const before = r.heading;
+    ride(0.5, () => ({ left: true, jump: true }), r);
+    ride(0.4, () => ({ left: true }), r);
+    expect(r.grounded).toBe(false);
+    expect(r.heading - before).toBeGreaterThan(1.5);
   });
 
   it('lands a backflip', () => {
