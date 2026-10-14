@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { SPOTS, type Spot, insideOf } from '../sim/village';
 import { heightAt } from '../sim/terrain';
-import { PALETTE, capsule, hanging, outlinedInstances, rounded, toon } from './toon';
+import { PALETTE, capsule, hanging, merge, outlinedInstances, rounded, toon } from './toon';
+
+export { merge };
 
 // Villagers: slim storybook people (after Tiny Bookshop) at the tables and in little groups, drawn
 // instanced with a palette of jackets, trousers, hair and hats, and a thin ink outline. They chat
@@ -14,28 +16,6 @@ const HATS = [P.oat, P.terracotta, P.mustard, P.raspberry, P.pine, P.sky];
 const HAIR = [P.hairDark, P.hairBrown, P.hairGinger, P.hairBlond, P.hairDark, 0x9a9590];
 const SHOES = [P.ink, 0x6a4a3a, P.terracotta, 0xe8e0d0];
 const SKIN = [P.skinLight, P.skinMid, P.skinDeep, 0x7a4e35];
-
-/** Merges geometries (keeping their smooth normals) into one non-indexed geometry. */
-export function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const flatParts = parts.map((g) => {
-    const n = g.toNonIndexed();
-    if (!n.attributes.normal) n.computeVertexNormals();
-    return n;
-  });
-  const count = flatParts.reduce((n, g) => n + g.attributes.position.count, 0);
-  const pos = new Float32Array(count * 3);
-  const nor = new Float32Array(count * 3);
-  let o = 0;
-  for (const g of flatParts) {
-    pos.set(g.attributes.position.array as Float32Array, o);
-    nor.set(g.attributes.normal.array as Float32Array, o);
-    o += g.attributes.position.array.length;
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  return out;
-}
 
 const at = (g: THREE.BufferGeometry, x: number, y: number, z: number) => g.translate(x, y, z);
 /** A cap of hair (or a hat crown) over the top of the head, `cover` of the way down. */

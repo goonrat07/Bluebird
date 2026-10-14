@@ -119,3 +119,30 @@ export function outlinedInstances(m: THREE.InstancedMesh, width = 0.012): THREE.
   m.parent?.add(line);
   return line;
 }
+
+/** Merges geometries (keeping their smooth normals) into one non-indexed geometry. */
+export function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const flatParts = parts.map((g) => {
+    const n = g.toNonIndexed();
+    if (!n.attributes.normal) n.computeVertexNormals();
+    return n;
+  });
+  const count = flatParts.reduce((n, g) => n + g.attributes.position.count, 0);
+  const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
+  // Vertex colours come along when every part has them.
+  const col = flatParts.every((g) => g.attributes.color) ? new Float32Array(count * 3) : null;
+  let o = 0;
+  for (const g of flatParts) {
+    pos.set(g.attributes.position.array as Float32Array, o);
+    nor.set(g.attributes.normal.array as Float32Array, o);
+    col?.set(g.attributes.color.array as Float32Array, o);
+    o += g.attributes.position.array.length;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return out;
+}
+

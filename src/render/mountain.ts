@@ -44,6 +44,10 @@ function tint(x: number, z: number, c: THREE.Color): THREE.Color {
   // Soft wind-carved variation so big sunlit faces aren't one flat color.
   const wind = 1 - 0.035 * (Math.sin(x * 0.21 + z * 0.13) * Math.sin(z * 0.37 - x * 0.05) + 1);
   c.multiplyScalar(wind);
+  // Broad, soft patches a touch warmer or cooler, like brushwork, so open snow isn't one flat sheet.
+  const wash = Math.sin(x * 0.017 + z * 0.011) * Math.sin(z * 0.023 - x * 0.007);
+  c.r *= 1 + 0.025 * wash;
+  c.b *= 1 - 0.02 * wash;
   if (onKicker(x, z)) c.multiply(KICKER_TINT);
   if (isNearLip(x, z)) c.copy(LIP_TINT); // mark the lip so it's easy to time the pop
   return c;
