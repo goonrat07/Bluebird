@@ -43,6 +43,15 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `src/sim/bots.ts` – scripted riders for rival ghosts and tests; medal targets are set from their runs.
 - `src/audio/sound.ts` – synthesized WebAudio, no audio files.
 
+## Skills (goonrat07/claude-skills)
+Miguel keeps Claude skills in the `goonrat07/claude-skills` repo. At the start of any visual, modelling or riding-feel
+work, attach and clone it (it's in this project's repo list) and follow the matching skill's SKILL.md:
+- Characters, props or any Blender model: `blender-art-director` (it drives `inspo-analysis`, `blender-taste`,
+  `blender-build` and `render-critique`). Use it with `tools/blender/characters.py` and the Tiny Bookshop references.
+- Any visual change: `snow-game-style-guide` for the look and its review checklist.
+- Checking a change in the browser: `snow-game-playtest`. Changing how riding feels: `ride-feel-tuning`.
+When a skill and this file disagree on the game's own layout or commands, this file wins.
+
 ## Conventions
 - Keyboard only. Tricks must never need more than two keys at once.
 - Every change that affects riding or visuals gets a play test run and a look at the screenshots before it's called done.
