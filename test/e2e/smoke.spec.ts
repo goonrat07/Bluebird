@@ -397,6 +397,32 @@ test('events: countdown, a ghost to chase, and a result', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('characters up close', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  await load(page, errors);
+  const frames = async (n: number) => {
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction(([f, n]) => window.__game!.telemetry().frame > f + n, [f, n]);
+  };
+  // On foot by the lodge terrace: the rider close up, with the crowd behind.
+  await page.evaluate(() => window.__game!.placeAt(44, 1560));
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => window.__game!.telemetry().walking);
+  // Turn a little so the face shows.
+  await page.keyboard.down('KeyA');
+  await frames(6);
+  await page.keyboard.up('KeyA');
+  await frames(3);
+  await page.screenshot({ path: 'test/artifacts/char-walk.png' });
+  // Riding.
+  await page.keyboard.press('KeyB');
+  await page.evaluate(() => window.__game!.teleport(180, 4, 12));
+  await frames(6);
+  await page.screenshot({ path: 'test/artifacts/char-ride.png' });
+  expect(errors).toEqual([]);
+});
+
 test.describe('on a high-DPI screen', () => {
   test.use({ deviceScaleFactor: 1.5 });
   test('the trail map fills the screen', async ({ page }) => {

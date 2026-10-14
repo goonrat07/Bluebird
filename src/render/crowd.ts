@@ -1,52 +1,66 @@
 import * as THREE from 'three';
 import { SPOTS, type Spot, insideOf } from '../sim/village';
 import { heightAt } from '../sim/terrain';
+import { PALETTE, capsule, hanging, toon } from './toon';
 
 // Villagers: chunky low-poly people at the tables and in little groups, drawn instanced
 // with a palette of jackets and hats. They chat (a gentle sway), and cheer when you land
 // something big near them.
 
-const JACKETS = [0xd9553a, 0x2d6cc0, 0x2f8f5b, 0xe0b13b, 0x8b5bc4, 0xe8e4da, 0x3f6f86, 0xc76a9a];
-const HATS = [0xe8e4da, 0xd9553a, 0x2b2b38, 0xe0b13b, 0x5b8fd6];
-const SKIN = [0xf0c8a0, 0xd9a47a, 0xa8714f, 0x7a4e35];
-const PANTS = 0x2f3b4c;
+const P = PALETTE;
+const JACKETS = [P.terracotta, P.mustard, P.pine, P.denim, P.raspberry, P.sage, P.oat, P.plum];
+const HATS = [P.oat, P.terracotta, P.mustard, P.raspberry, P.pine, P.blush];
+const SKIN = [P.skinLight, P.skinMid, P.skinDeep, 0x7a4e35];
+const PANTS = P.denim;
 
-const box = (w: number, h: number, d: number, x: number, y: number, z: number) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
-
-/** Merges box geometries into one non-indexed geometry. */
+/** Merges geometries (keeping their smooth normals) into one non-indexed geometry. */
 export function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const flatParts = parts.map((g) => g.toNonIndexed());
+  const flatParts = parts.map((g) => {
+    const n = g.toNonIndexed();
+    if (!n.attributes.normal) n.computeVertexNormals();
+    return n;
+  });
   const count = flatParts.reduce((n, g) => n + g.attributes.position.count, 0);
   const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
   let o = 0;
   for (const g of flatParts) {
     pos.set(g.attributes.position.array as Float32Array, o);
+    nor.set(g.attributes.normal.array as Float32Array, o);
     o += g.attributes.position.array.length;
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  out.computeVertexNormals();
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   return out;
 }
 
-/** Person parts, feet at y = 0 when standing, facing +z. */
+const at = (g: THREE.BufferGeometry, x: number, y: number, z: number) => g.translate(x, y, z);
+/** A limb from (y0) along +z or down, as a capsule. */
+const thigh = (x: number) => capsule(0.09, 0.45, 6).rotateX(Math.PI / 2).translate(x, 0.47, -0.02);
+
+/** Person parts, feet at y = 0 when standing, facing +z: round heads, bean bodies, capsule limbs. */
 export const PERSON = {
-  legsStand: () => merge([box(0.17, 0.78, 0.2, -0.11, 0.39, 0), box(0.17, 0.78, 0.2, 0.11, 0.39, 0)]),
+  legsStand: () => merge([at(capsule(0.09, 0.8, 6), -0.1, 0, 0), at(capsule(0.09, 0.8, 6), 0.1, 0, 0)]),
   // Seated: thighs forward, shins down, hips 0.45 up.
-  legsSit: () =>
-    merge([box(0.17, 0.17, 0.45, -0.11, 0.47, 0.2), box(0.17, 0.17, 0.45, 0.11, 0.47, 0.2), box(0.17, 0.45, 0.17, -0.11, 0.22, 0.4), box(0.17, 0.45, 0.17, 0.11, 0.22, 0.4)]),
-  /** Torso, hips at y = 0. */
-  torso: () => box(0.46, 0.58, 0.28, 0, 0.29, 0),
+  legsSit: () => merge([thigh(-0.1), thigh(0.1), at(capsule(0.085, 0.47, 6), -0.1, 0, 0.4), at(capsule(0.085, 0.47, 6), 0.1, 0, 0.4)]),
+  /** Torso, hips at y = 0: a puffy bean. */
+  torso: () => capsule(0.23, 0.62, 10).scale(1, 1, 0.8).translate(0, -0.02, 0),
   /** Arms hanging. */
-  armsDown: () => merge([box(0.13, 0.55, 0.15, -0.3, 0.3, 0), box(0.13, 0.55, 0.15, 0.3, 0.3, 0)]),
+  armsDown: () => merge([at(hanging(0.07, 0.5, 6), -0.28, 0.55, 0), at(hanging(0.07, 0.5, 6), 0.28, 0.55, 0)]),
   /** Arms up, for cheering. */
-  arms: () => merge([box(0.13, 0.55, 0.15, -0.32, 0.85, 0), box(0.13, 0.55, 0.15, 0.32, 0.85, 0)]),
-  /** Head (hips at y = 0). */
-  head: () => box(0.28, 0.28, 0.28, 0, 0.74, 0),
-  hat: () => box(0.31, 0.13, 0.31, 0, 0.93, 0),
+  arms: () => merge([at(capsule(0.07, 0.55, 6), -0.3, 0.52, 0), at(capsule(0.07, 0.55, 6), 0.3, 0.52, 0)]),
+  /** Head (hips at y = 0): big and round. */
+  head: () => new THREE.SphereGeometry(0.2, 12, 9).translate(0, 0.8, 0),
+  /** Dot eyes on the front of the head. */
+  eyes: () => merge([-1, 1].map((x) => new THREE.SphereGeometry(0.026, 6, 5).scale(1, 1.3, 0.5).translate(x * 0.07, 0.82, 0.19))),
+  /** Rosy cheeks under the eyes. */
+  cheeks: () => merge([-1, 1].map((x) => new THREE.SphereGeometry(0.04, 6, 5).scale(1, 0.7, 0.35).translate(x * 0.115, 0.76, 0.165))),
+  /** A beanie with a pom-pom. */
+  hat: () => merge([new THREE.SphereGeometry(0.21, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.45).translate(0, 0.83, 0), new THREE.SphereGeometry(0.06, 8, 6).translate(0, 1.04, 0)]),
 };
 
-const flat = (color = 0xffffff) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.9 });
+const flat = (color = 0xffffff) => toon(color);
 
 interface Person {
   spot: Spot;
@@ -65,6 +79,8 @@ export class CrowdView {
   private readonly armsDown: THREE.InstancedMesh;
   private readonly head: THREE.InstancedMesh;
   private readonly hat: THREE.InstancedMesh;
+  private readonly eyes: THREE.InstancedMesh;
+  private readonly cheeks: THREE.InstancedMesh;
   private time = 0;
 
   constructor() {
@@ -83,6 +99,8 @@ export class CrowdView {
     this.armsDown = new THREE.InstancedMesh(PERSON.armsDown(), flat(), n);
     this.head = new THREE.InstancedMesh(PERSON.head(), flat(), n);
     this.hat = new THREE.InstancedMesh(PERSON.hat(), flat(), n);
+    this.eyes = new THREE.InstancedMesh(PERSON.eyes(), flat(P.ink), n);
+    this.cheeks = new THREE.InstancedMesh(PERSON.cheeks(), flat(P.blush), n);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
@@ -104,6 +122,7 @@ export class CrowdView {
       mesh.castShadow = true;
       this.root.add(mesh);
     }
+    this.root.add(this.eyes, this.cheeks);
     this.update(0);
   }
 
@@ -141,9 +160,11 @@ export class CrowdView {
       this.torso.setMatrixAt(i, m);
       this.head.setMatrixAt(i, m);
       this.hat.setMatrixAt(i, m);
+      this.eyes.setMatrixAt(i, m);
+      this.cheeks.setMatrixAt(i, m);
       this.arms.setMatrixAt(i, cheering ? m : m.clone().scale(hide));
       this.armsDown.setMatrixAt(i, cheering ? m.clone().scale(hide) : m);
     });
-    for (const mesh of [this.torso, this.arms, this.armsDown, this.head, this.hat]) mesh.instanceMatrix.needsUpdate = true;
+    for (const mesh of [this.torso, this.arms, this.armsDown, this.head, this.hat, this.eyes, this.cheeks]) mesh.instanceMatrix.needsUpdate = true;
   }
 }

@@ -154,7 +154,7 @@ function interiors(): THREE.Group {
       g.add(lamp);
       // A counter across the back with goods behind it.
       g.add(mesh(new THREE.BoxGeometry(4, 1.05, 0.7), MAT.timberDark, c.x, y + 0.52, c.z + 1.2));
-      const rack = c.action === 'swapGear' ? [0x2a3a55, 0xe0563b, 0x2f8f5b, 0x5b8fd6, 0xe0b13b] : [0xe0563b, 0x2d6cc0, 0x2f8f5b, 0xe0b13b, 0x8b5bc4];
+      const rack = c.action === 'swapGear' ? [0x2a3a55, 0xe0563b, 0x2f8f5b, 0x5b8fd6, 0xe0b13b] : [0xe2725b, 0x3e5c8a, 0x4f8f7a, 0xf2b544, 0xd9637e];
       rack.forEach((color, i) => {
         const x = b.x - b.w / 2 + 1.2 + i * ((b.w - 2.4) / (rack.length - 1));
         const item =
