@@ -29,6 +29,34 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8d6; }
 #flow-track { width: 220px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
 #flow-fill { height: 100%; background: #fff3d6; transform-origin: left; transform: scaleX(0); box-shadow: 0 0 8px rgba(255, 230, 190, 0.8); }
 #flow.full #flow-fill { background: #ffd28a; }
+#event {
+  position: absolute; left: 50%; top: 18px; transform: translateX(-50%); text-align: center;
+  opacity: 0; transition: opacity 0.2s; text-shadow: 0 1px 6px rgba(20, 24, 40, 0.45);
+}
+#event.on { opacity: 1; }
+#event .event-name { font-size: 12px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; }
+#event .event-live { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+#event .event-sub { font-size: 12px; opacity: 0.85; }
+#countdown {
+  position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); text-align: center;
+  font-size: 96px; font-weight: 800; opacity: 0; text-shadow: 0 2px 16px rgba(20, 24, 40, 0.45);
+}
+#countdown.on { opacity: 1; }
+#countdown .blurb { display: block; font-size: 16px; font-weight: 500; margin-bottom: 8px; }
+#result {
+  position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%); text-align: center;
+  padding: 18px 28px; border-radius: 12px; background: rgba(28, 34, 54, 0.55); backdrop-filter: blur(4px);
+  opacity: 0; transition: opacity 0.3s;
+}
+#result.on { opacity: 1; }
+#result .medal { font-size: 14px; font-weight: 700; letter-spacing: 0.25em; text-transform: uppercase; }
+#result .medal.bronze { color: #e0a070; }
+#result .medal.silver { color: #dfe6f0; }
+#result .medal.gold { color: #ffd27a; }
+#result .medal.platinum { color: #bfe9ff; }
+#result .result-value { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#result .result-best { font-size: 14px; font-weight: 700; color: #ffd27a; }
+#result .result-sub { font-size: 12px; opacity: 0.8; margin-top: 4px; }
 #balance {
   position: absolute; left: 50%; top: 68%; transform: translateX(-50%);
   opacity: 0; transition: opacity 0.15s;

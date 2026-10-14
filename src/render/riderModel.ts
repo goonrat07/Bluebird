@@ -112,6 +112,24 @@ export class RiderModel {
     this.lean.add(this.board, this.skis);
   }
 
+  /** Turns this model into a see-through ghost that casts no shadow. */
+  makeGhost(): void {
+    const ghost = new THREE.MeshStandardMaterial({
+      color: 0xdfe6ff,
+      emissive: 0x3a4466,
+      flatShading: true,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+    });
+    this.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.material = ghost;
+        o.castShadow = false;
+      }
+    });
+  }
+
   update(p: RiderPose, dt: number): void {
     if (p.sport !== this.sport) {
       this.sport = p.sport;
