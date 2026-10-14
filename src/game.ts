@@ -29,6 +29,8 @@ const STEP = 1 / WORLD.stepHz;
 export class Game {
   private rider: RiderState = createRider();
   private prevPos: Vec3 = { ...this.rider.pos };
+  private prevHeading = 0;
+  private prevPitch = 0;
   private accumulator = 0;
   private lastTime = 0;
   private frame = 0;
@@ -56,6 +58,8 @@ export class Game {
     else if (c === 'toggleTuning') this.tuning.toggle();
     if (c === 'reset' || c === 'restart') {
       this.prevPos = { ...this.rider.pos };
+      this.prevHeading = this.rider.heading;
+      this.prevPitch = this.rider.pitch;
       this.snapCamera = true;
     }
   }
@@ -94,6 +98,8 @@ export class Game {
     this.accumulator += dt;
     while (this.accumulator >= STEP) {
       this.prevPos = { ...this.rider.pos };
+      this.prevHeading = this.rider.heading;
+      this.prevPitch = this.rider.pitch;
       const before = this.rider.grounded;
       stepRider(this.rider, input, STEP);
       if (!before && this.rider.grounded) landed = true;
@@ -102,13 +108,18 @@ export class Game {
     const alpha = this.accumulator / STEP;
     const r = this.rider;
     const pos = add(this.prevPos, scale(sub(r.pos, this.prevPos), alpha));
+    // Rotation is interpolated too, so turns and spins stay smooth on any refresh rate.
+    const dh = Math.atan2(Math.sin(r.heading - this.prevHeading), Math.cos(r.heading - this.prevHeading));
+    const heading = this.prevHeading + dh * alpha;
+    // Landing resets pitch from a full turn back to 0; don't draw a reverse flip between them.
+    const pitch = Math.abs(r.pitch - this.prevPitch) > 1 ? r.pitch : this.prevPitch + (r.pitch - this.prevPitch) * alpha;
 
     this.view.render(
       {
         pos,
         vel: r.vel,
-        heading: r.heading,
-        pitch: r.pitch,
+        heading,
+        pitch,
         edge: r.edge,
         speed: speedOf(r),
         sport: r.sport,
