@@ -138,3 +138,29 @@ test('riding onto the park box grinds it', async ({ page }) => {
   await page.waitForFunction(() => window.__game!.telemetry().rail === null, null, { timeout: 60_000 });
   expect(errors).toEqual([]);
 });
+
+test('events: countdown, a ghost to chase, and a result', async ({ page }) => {
+  test.setTimeout(240_000);
+  const errors: string[] = [];
+  await load(page, errors);
+  await page.keyboard.press('Digit1');
+  await page.waitForFunction(() => window.__game!.telemetry().event?.phase === 'countdown');
+  await page.screenshot({ path: 'test/artifacts/event-countdown.png' });
+  await page.waitForFunction(() => (window.__game!.telemetry().event?.clock ?? 0) > 3, null, { timeout: 90_000 });
+  const t = await telemetry(page);
+  console.log(`slopestyle: ghost ${t.event!.ghost} at z ${t.event!.ghostZ?.toFixed(0)}, rider at z ${t.pos.z.toFixed(0)}`);
+  expect(t.event!.ghost).toBe('Rival');
+  await page.screenshot({ path: 'test/artifacts/event-ghost.png' });
+
+  // The glade dash ridden hands-off drifts out of the trees, which ends the run with a result card.
+  await page.keyboard.press('Digit2');
+  await page.waitForFunction(() => window.__game!.telemetry().event?.id === 'treeRun');
+  await page.waitForFunction(() => window.__game!.telemetry().event?.phase === 'done', null, { timeout: 180_000 });
+  const done = await telemetry(page);
+  console.log(`glade dash: ${JSON.stringify(done.event!.result)}`);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: 'test/artifacts/event-result.png' });
+  await page.keyboard.press('Backspace');
+  await page.waitForFunction(() => window.__game!.telemetry().event === null);
+  expect(errors).toEqual([]);
+});

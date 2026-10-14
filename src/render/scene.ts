@@ -60,6 +60,7 @@ export class SceneView {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2000);
   private readonly rider = new RiderModel();
+  private readonly ghost = new RiderModel();
   private readonly spray = new Spray();
   private readonly sun = new THREE.DirectionalLight(0xffffff, 3);
   private readonly hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
@@ -96,7 +97,9 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.ghost.root, this.spray.points);
+    this.ghost.makeGhost();
+    this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
     this.applyPreset(PRESETS[0]);
     this.resize();
@@ -142,6 +145,14 @@ export class SceneView {
     this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Poses the event ghost for this frame, or hides it. */
+  renderGhost(p: (RiderPose & { pos: Vec3 }) | null, dt: number): void {
+    this.ghost.root.visible = p !== null;
+    if (!p) return;
+    this.ghost.root.position.set(p.pos.x, p.pos.y, p.pos.z);
+    this.ghost.update(p, dt);
   }
 
   /** Draws one frame. `snap` jumps the camera into place instead of easing (used after a reset). */

@@ -1,11 +1,12 @@
 import { WORLD, type AssistLevel } from './sim/tuning';
 import { RAILS } from './sim/rails';
-import { centerX, heightAt } from './sim/terrain';
 import { createRider, isSwitch, resetToSafeSpot, restart, speedOf, stepRider, swapSport, type RiderState } from './sim/rider';
 import { Keyboard, noInput, type Command, type RideInput } from './sim/input';
 import { SceneView } from './render/scene';
 import { Hud } from './ui/hud';
 import { Sound } from './audio/sound';
+import { EventSession } from './eventSession';
+import { EVENTS, placeRider, type EventId } from './sim/events';
 import { TuningPanel } from './ui/tuningPanel';
 import { type Vec3, add, scale, sub } from './sim/vec';
 
@@ -34,6 +35,17 @@ export interface Telemetry {
   sound: string;
   /** Loudness of the sound output right now (RMS). */
   soundLevel: number;
+  /** The event being ridden, if any. */
+  event: {
+    id: EventId;
+    phase: 'countdown' | 'running' | 'done';
+    clock: number;
+    score: number;
+    result: { finished: boolean; value: number; medal: string | null; reason: string } | null;
+    newBest: boolean;
+    ghost: string | null;
+    ghostZ: number | null;
+  } | null;
 }
 
 const STEP = 1 / WORLD.stepHz;
@@ -55,6 +67,8 @@ export class Game {
   private readonly sound = new Sound(window);
   private heardLandings = 0;
   private heardBranches = 0;
+  private event: EventSession | null = null;
+  private ghostPrev: Vec3 | null = null;
 
   constructor(private readonly view: SceneView) {
     this.keyboard.onCommand((c) => this.command(c));
@@ -68,6 +82,11 @@ export class Game {
   }
 
   command(c: Command): void {
+    // Events replay from their inputs alone, so mid-run only a fresh start or leaving is allowed.
+    if (c === 'slopestyle' || c === 'treeRun') return this.startEvent(c);
+    if (this.event?.active && c === 'reset') return this.startEvent(this.event.def.id);
+    if (this.event?.active && c === 'swapSport') return;
+    if (c === 'reset' || c === 'restart' || c === 'swapSport') this.event = null;
     if (c === 'reset') resetToSafeSpot(this.rider);
     else if (c === 'restart') restart(this.rider);
     else if (c === 'swapSport') swapSport(this.rider);
@@ -83,16 +102,25 @@ export class Game {
     }
   }
 
+  /** Starts (or restarts) an event: a fresh rider at its gate, a countdown, and a ghost to chase. */
+  startEvent(id: EventId): void {
+    this.event = new EventSession(EVENTS[id], this.rider.sport, this.rider.assist);
+    this.useRider(this.event.rider);
+    this.ghostPrev = null;
+  }
+
   /** Debug: puts the rider at distance z down the run, u metres off the centerline, moving downhill. */
   teleport(z: number, u = 0, speed = 10): void {
-    const x = centerX(z) + u;
     const r = createRider(this.rider.sport, this.rider.assist);
-    r.pos = { x, y: heightAt(x, z), z };
-    // Moving along the snow surface, so the rider doesn't launch off a steep pitch.
-    const drop = heightAt(x, z + 1) - heightAt(x, z);
-    r.vel = { x: 0, y: (speed * drop) / Math.hypot(1, drop), z: speed / Math.hypot(1, drop) };
-    r.safeSpots = [{ pos: { ...r.pos }, heading: 0 }];
+    placeRider(r, z, u, speed);
+    this.event = null;
+    this.useRider(r);
+  }
+
+  private useRider(r: RiderState): void {
     this.rider = r;
+    this.heardLandings = r.landings;
+    this.heardBranches = r.branchHits;
     this.prevPos = { ...r.pos };
     this.prevHeading = r.heading;
     this.prevPitch = r.pitch;
@@ -127,7 +155,45 @@ export class Game {
       balance: r.rail?.balance ?? 0,
       sound: this.sound.state,
       soundLevel: this.sound.level(),
+      event: this.event && {
+        id: this.event.def.id,
+        phase: this.event.run.phase,
+        clock: this.event.run.clock,
+        score: this.event.run.score,
+        result: this.event.run.result,
+        newBest: this.event.newBest,
+        ghost: this.event.ghost ? this.event.ghostLabel : null,
+        ghostZ: this.event.ghost?.rider.pos.z ?? null,
+      },
     };
+  }
+
+  private renderGhost(alpha: number, dt: number): void {
+    const g = this.event?.ghost?.rider;
+    // Hide the ghost during the countdown (it's standing right where you are) and once you're done.
+    if (!g || !this.ghostPrev || this.event!.run.phase === 'countdown') {
+      this.view.renderGhost(null, dt);
+      return;
+    }
+    this.view.renderGhost(
+      {
+        pos: add(this.ghostPrev, scale(sub(g.pos, this.ghostPrev), alpha)),
+        heading: g.heading,
+        pitch: g.pitch,
+        edge: g.rail ? g.rail.balance * 0.8 : g.edge,
+        speed: speedOf(g),
+        sport: g.sport,
+        grounded: g.grounded,
+        crashed: g.crashed,
+        crashTimer: g.crashTimer,
+        charge: g.charge,
+        tucking: g.tucking,
+        braking: g.braking,
+        grab: g.grab,
+        switch: isSwitch(g),
+      },
+      dt,
+    );
   }
 
   /** Plays one-shot sounds for what just happened in a simulation step. */
@@ -162,7 +228,9 @@ export class Game {
       const before = this.rider.grounded;
       const wasOnRail = this.rider.rail !== null;
       const popping = this.rider.jumpHeld && !input.jump;
-      stepRider(this.rider, input, STEP);
+      if (this.event?.ghost) this.ghostPrev = { ...this.event.ghost.rider.pos };
+      if (this.event) this.event.step(input, STEP);
+      else stepRider(this.rider, input, STEP);
       if (!before && this.rider.grounded) landed = true;
       this.listen(before, wasOnRail, popping);
       this.accumulator -= STEP;
@@ -207,6 +275,8 @@ export class Game {
     this.hud.update(dt, speedOf(r) * 3.6, r.sport, r.assist, r.lastTrick, r.landings);
     this.hud.updateFlow(dt, r.flow, r.branchHits);
     this.hud.updateBalance(dt, r.rail?.balance ?? null);
+    this.hud.updateEvent(this.event);
+    this.renderGhost(alpha, dt);
     this.sound.update({
       speed: speedOf(r),
       grounded: r.grounded,

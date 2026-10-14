@@ -19,6 +19,11 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `window.__game` – debug hook for play tests (`ready`, `telemetry()`, `command()`, `setAssist()`, `teleport(z, u)`).
 - `src/sim/terrain.ts` – Kettle Run: pitch profile, winding centerline, kickers. Measure across the run with `lateral()`.
 - `src/render/presets/` – time-of-day light presets (T cycles in game).
+- `src/sim/rails.ts` – park rails and boxes; grinding lives in `rider.ts`.
+- `src/sim/events.ts` – events (start, finish, scoring, medals); `src/sim/replay.ts` records rides as one input mask per step.
+  Ghosts replay those inputs, so anything that changes a ride must go through `RideInput`, never a side command.
+- `src/sim/bots.ts` – scripted riders for rival ghosts and tests; medal targets are set from their runs.
+- `src/audio/sound.ts` – synthesized WebAudio, no audio files.
 
 ## Conventions
 - Keyboard only. Tricks must never need more than two keys at once.
