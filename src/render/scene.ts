@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SLOPE, heightAt, isNearLip, snowAt } from '../sim/terrain';
+import { RUN, centerX, heightAt, isNearLip, onKicker, snowAt } from '../sim/terrain';
 import { TREES, treeBaseY } from '../sim/trees';
 import type { SnowType } from '../sim/tuning';
 import type { Vec3 } from '../sim/vec';
@@ -79,13 +79,14 @@ export class SceneView {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.02;
     const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -45;
-    sc.right = sc.top = 45;
+    sc.left = sc.bottom = -60;
+    sc.right = sc.top = 60;
     sc.far = 500;
     this.scene.add(this.hemi, this.sun, this.sun.target);
 
-    this.peaks = buildPeaks(new THREE.Vector3(0, -SLOPE.length * SLOPE.grade * 0.5, SLOPE.length * 0.5));
-    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), ...buildTrees(), this.trails.mesh, this.rider.root, this.spray.points);
+    const mid = RUN.length / 2;
+    this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
+    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), ...buildTrees(), this.trails.mesh, this.rider.root, this.spray.points);
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
     this.applyPreset(PRESETS[0]);
     this.resize();
@@ -189,30 +190,72 @@ export class SceneView {
 }
 
 function buildSlope(material: THREE.Material): THREE.Mesh {
-  const width = SLOPE.halfWidth * 2;
-  const geo = new THREE.PlaneGeometry(width, SLOPE.length + 100, 140, 650);
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, 0, SLOPE.length / 2);
-  const p = geo.attributes.position;
-  const colors = new Float32Array(p.count * 3);
+  // A grid laid along the run's centerline: rows down the hill, columns across it.
+  const U = 95;
+  const cols = 150;
+  const z0 = -120;
+  const z1 = RUN.length + 260;
+  const rows = 1250;
+  const positions = new Float32Array((rows + 1) * (cols + 1) * 3);
+  const colors = new Float32Array((rows + 1) * (cols + 1) * 3);
   const c = new THREE.Color();
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i);
-    const z = p.getZ(i);
-    p.setY(i, heightAt(x, z));
-    c.copy(SNOW_TINTS[snowAt(x, z)]);
-    // Soft wind-carved variation so big sunlit faces aren't one flat color.
-    const wind = 1 - 0.035 * (Math.sin(x * 0.21 + z * 0.13) * Math.sin(z * 0.37 - x * 0.05) + 1);
-    c.multiplyScalar(wind);
-    if (heightAt(x, z) - heightAt(x + 8, z) > 0.5 && Math.abs(x) < 8) c.multiply(KICKER_TINT);
-    if (isNearLip(x, z)) c.copy(LIP_TINT); // mark the lip so it's easy to time the pop
-    colors.set([c.r, c.g, c.b], i * 3);
+  for (let r = 0; r <= rows; r++) {
+    const z = z0 + ((z1 - z0) * r) / rows;
+    const cx = centerX(z);
+    for (let k = 0; k <= cols; k++) {
+      const u = -U + (2 * U * k) / cols;
+      const x = cx + u;
+      const i = r * (cols + 1) + k;
+      positions.set([x, heightAt(x, z), z], i * 3);
+      c.copy(SNOW_TINTS[snowAt(x, z)]);
+      // Soft wind-carved variation so big sunlit faces aren't one flat color.
+      const wind = 1 - 0.035 * (Math.sin(x * 0.21 + z * 0.13) * Math.sin(z * 0.37 - x * 0.05) + 1);
+      c.multiplyScalar(wind);
+      if (onKicker(x, z)) c.multiply(KICKER_TINT);
+      if (isNearLip(x, z)) c.copy(LIP_TINT); // mark the lip so it's easy to time the pop
+      colors.set([c.r, c.g, c.b], i * 3);
+    }
   }
+  const index: number[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let k = 0; k < cols; k++) {
+      const a = r * (cols + 1) + k;
+      const b = a + 1;
+      const d = a + cols + 1;
+      const e = d + 1;
+      index.push(a, d, b, b, d, e); // counter-clockwise from above, so normals face up
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setIndex(index);
   geo.computeVertexNormals();
   const mesh = new THREE.Mesh(geo, material);
   mesh.receiveShadow = true;
   return mesh;
+}
+
+/** A simple finish banner across the run at the bottom of the Kettle Wall. */
+function buildFinish(): THREE.Group {
+  const g = new THREE.Group();
+  const z = RUN.finishZ;
+  const cx = centerX(z);
+  const flat = (color: number) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.8 });
+  for (const side of [-1, 1]) {
+    const x = cx + side * 14;
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.4, 6, 0.4), flat(0x2f3b4c));
+    pole.position.set(x, heightAt(x, z) + 3, z);
+    pole.castShadow = true;
+    g.add(pole);
+  }
+  const bannerMat = flat(0xd9553a);
+  bannerMat.emissive.set(0x5a1a10); // reads as red even with the sun behind it
+  const banner = new THREE.Mesh(new THREE.BoxGeometry(28, 1.4, 0.2), bannerMat);
+  banner.position.set(cx, Math.max(heightAt(cx - 14, z), heightAt(cx + 14, z)) + 5.6, z);
+  banner.castShadow = true;
+  g.add(banner);
+  return g;
 }
 
 function buildTrees(): THREE.Object3D[] {
@@ -227,7 +270,7 @@ function buildTrees(): THREE.Object3D[] {
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.28, 1.2, 6);
   trunkGeo.translate(0, 0.6, 0);
   const flat = (color: number) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.95 });
-  const crowns = new THREE.InstancedMesh(crownGeo, flat(0x37594e), TREES.length);
+  const crowns = new THREE.InstancedMesh(crownGeo, flat(0x3f6657), TREES.length);
   const caps = new THREE.InstancedMesh(capGeo, flat(0xf3f1ef), TREES.length);
   const trunks = new THREE.InstancedMesh(trunkGeo, flat(0x5a4038), TREES.length);
   crowns.castShadow = caps.castShadow = true;

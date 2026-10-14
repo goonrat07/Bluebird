@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createRider, speedOf, stepRider, type RiderState } from '../../src/sim/rider';
-import { heightAt } from '../../src/sim/terrain';
+import { START, centerX, heightAt } from '../../src/sim/terrain';
 import { noInput, type RideInput } from '../../src/sim/input';
 import { WORLD, type Sport } from '../../src/sim/tuning';
 import { vec } from '../../src/sim/vec';
@@ -36,7 +36,7 @@ function launched(sport: Sport = 'board', height = 14): RiderState {
 
 describe('riding', () => {
   it('picks up speed going downhill from a standstill', () => {
-    const { r } = ride(4);
+    const { r } = ride(6);
     expect(speedOf(r)).toBeGreaterThan(8);
     expect(r.pos.z).toBeGreaterThan(20);
   });
@@ -75,7 +75,8 @@ describe('riding', () => {
   it('powder is slower than groomed snow', () => {
     const groomed = ride(6).r;
     const start = createRider();
-    start.pos = vec(30, heightAt(30, 300), 300);
+    const x = centerX(300) + 30;
+    start.pos = vec(x, heightAt(x, 300), 300);
     const before = start.pos.z;
     const powder = ride(6, () => ({}), start).r;
     expect(powder.snow).toBe('powder');
@@ -84,7 +85,7 @@ describe('riding', () => {
 
   it('skis can skate on the flats', () => {
     const r = createRider('ski');
-    r.pos = vec(0, heightAt(0, 10), 10);
+    r.pos = vec(START.x, heightAt(START.x, START.z), START.z);
     const pushed = ride(1, () => ({ up: true }), r).r;
     const coasted = ride(1, () => ({}), createRider('ski')).r;
     expect(speedOf(pushed)).toBeGreaterThan(speedOf(coasted));
@@ -198,8 +199,8 @@ describe('jumping and tricks', () => {
 describe('trees', () => {
   it('riding straight into a trunk is a crash', () => {
     const r = createRider();
-    // The glade starts around z = 260; aim straight at a known tree from 12 m uphill.
-    const tree = { x: 30, z: 400 };
+    // Aim straight at a tree in the glade from 12 m uphill.
+    const tree = { x: centerX(600) + 30, z: 600 };
     const target = TREES.reduce((best, t) =>
       Math.hypot(t.x - tree.x, t.z - tree.z) < Math.hypot(best.x - tree.x, best.z - tree.z) ? t : best,
     );

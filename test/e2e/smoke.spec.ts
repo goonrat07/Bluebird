@@ -79,3 +79,22 @@ test('skis swap in and the tuning panel opens', async ({ page }) => {
   await page.screenshot({ path: 'test/artifacts/noon.png' });
   expect(errors).toEqual([]);
 });
+
+test('landmarks down Kettle Run', async ({ page }) => {
+  const errors: string[] = [];
+  await load(page, errors);
+  // Fixed camera spots: the glade, the park line, the Kettle Wall and the finish.
+  const spots: [string, number, number][] = [
+    ['glade', 500, 30],
+    ['park', 800, 0],
+    ['wall', 1105, 0],
+    ['finish', 1420, 0],
+  ];
+  for (const [name, z, u] of spots) {
+    await page.evaluate(([z, u]) => window.__game!.teleport(z, u), [z, u]);
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 10, f);
+    await page.screenshot({ path: `test/artifacts/spot-${name}.png` });
+  }
+  expect(errors).toEqual([]);
+});

@@ -1,5 +1,5 @@
 import { AIR, ASSIST, CRASH, RIDE, SNOW, SPORTS, WORLD, type AssistLevel, type SnowType, type Sport } from './tuning';
-import { SLOPE, heightAt, isNearLip, normalAt, snowAt } from './terrain';
+import { START, heightAt, isNearLip, normalAt, snowAt } from './terrain';
 import { TRUNK_RADIUS, treesNear } from './trees';
 import { type AirLog, type GrabDir, type LandingQuality, type Trick, grabName, scoreTrick } from './tricks';
 import type { RideInput } from './input';
@@ -53,7 +53,7 @@ export interface RiderState {
 const emptyAirLog = (): AirLog => ({ spin: 0, flip: 0, grab: null, grabTime: 0, airTime: 0, switchTakeoff: false });
 
 export function createRider(sport: Sport = 'board', assist: AssistLevel = 'normal'): RiderState {
-  const { x, z } = SLOPE.start;
+  const { x, z } = START;
   const pos = vec(x, heightAt(x, z), z);
   return {
     sport,
