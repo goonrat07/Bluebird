@@ -1,13 +1,31 @@
-import { AIR, ASSIST, CRASH, FLOW, GAP, RIDE, SNOW, SPORTS, WORLD, type AssistLevel, type SnowType, type Sport } from './tuning';
+import { AIR, ASSIST, CRASH, FLOW, GAP, RAIL, RIDE, SNOW, SPORTS, WORLD, type AssistLevel, type SnowType, type Sport } from './tuning';
 import { START, heightAt, isNearLip, normalAt, snowAt } from './terrain';
 import { TRUNK_RADIUS, treesNear, treesWithin } from './trees';
-import { type AirLog, type GrabDir, type LandingQuality, type Trick, grabName, scoreTrick } from './tricks';
+import { RAILS, railOffset, railPoint } from './rails';
+import { type AirLog, type GrabDir, type LandingQuality, type Trick, grabName, joinTricks, scoreGrind, scoreTrick } from './tricks';
 import type { RideInput } from './input';
 import { type Vec3, add, dot, length, normalize, projectOnPlane, scale, sub, vec } from './vec';
 
 interface SafeSpot {
   pos: Vec3;
   heading: number;
+}
+
+/** Riding along a rail or box. */
+export interface GrindState {
+  /** Index into RAILS. */
+  index: number;
+  /** Distance along the rail (m). */
+  t: number;
+  speed: number;
+  /** -1..1: how far the rider is tipping (positive = to the left); past ±1 they come off. */
+  balance: number;
+  balanceVel: number;
+  time: number;
+  /** Sideways (boardslide) rather than straight along (50-50). */
+  slide: boolean;
+  /** Furthest the balance got from centre, for the landing quality. */
+  worst: number;
 }
 
 export interface RiderState {
@@ -55,10 +73,13 @@ export interface RiderState {
   branchHits: number;
   /** The tree whose branches were last clipped, so one tree only counts once per pass. */
   lastBranchTree: number;
+  rail: GrindState | null;
+  /** A rail just slipped off, ignored until back on the snow so the rider doesn't snap straight back on. */
+  offRail: number;
   time: number;
 }
 
-const emptyAirLog = (): AirLog => ({ spin: 0, flip: 0, grab: null, grabTime: 0, airTime: 0, switchTakeoff: false });
+const emptyAirLog = (): AirLog => ({ spin: 0, flip: 0, grab: null, grabTime: 0, airTime: 0, switchTakeoff: false, rail: null });
 
 export function createRider(sport: Sport = 'board', assist: AssistLevel = 'normal'): RiderState {
   const { x, z } = START;
@@ -94,6 +115,8 @@ export function createRider(sport: Sport = 'board', assist: AssistLevel = 'norma
     flowIdle: 0,
     branchHits: 0,
     lastBranchTree: -1,
+    rail: null,
+    offRail: -1,
     time: 0,
   };
 }
@@ -118,12 +141,19 @@ export function isSwitch(r: RiderState): boolean {
 /** Advances the rider by one fixed step. Deterministic: the same inputs always give the same ride. */
 export function stepRider(r: RiderState, input: RideInput, dt: number): void {
   r.time += dt;
+  if (r.rail) {
+    stepRail(r, input, dt);
+    updateFlow(r, dt);
+    return;
+  }
   if (r.crashed) stepCrashed(r, dt);
   else if (r.grounded) stepGround(r, input, dt);
   else stepAir(r, input, dt);
 
   r.vel = add(r.vel, vec(0, -WORLD.gravity * dt, 0));
+  const prevY = r.pos.y;
   r.pos = add(r.pos, scale(r.vel, dt));
+  if (!r.crashed && lockOnRail(r, prevY)) return;
   collideTrees(r);
   updateFlow(r, dt);
   resolveGround(r);
@@ -330,7 +360,8 @@ function land(r: RiderState, n: Vec3): void {
 
   const quality: LandingQuality =
     errDeg <= assist.cleanDeg ? 'clean' : errDeg <= (assist.cleanDeg + assist.surviveDeg) / 2 ? 'solid' : 'sketchy';
-  const trick = scoreTrick(r.sport, air, quality);
+  let trick = scoreTrick(r.sport, air, quality);
+  if (air.rail) trick = joinTricks(air.rail, trick, quality);
   if (trick) trick.score = Math.round(trick.score * (1 + FLOW.trickBonus * r.flow));
   if (trick) {
     r.lastTrick = trick;
@@ -351,6 +382,7 @@ function resolveGround(r: RiderState): void {
     const into = dot(r.vel, n);
     if (into < 0) r.vel = sub(r.vel, scale(n, into));
     r.snow = snowAt(r.pos.x, r.pos.z);
+    r.offRail = -1;
   } else if (wasGrounded) {
     // Ground fell away (off a lip or a roller): airborne without a pop.
     if (r.crashed) r.grounded = false;
@@ -439,6 +471,108 @@ function gapSense(r: RiderState, dt: number): void {
   const sn = Math.sin(turn);
   r.vel = vec(r.vel.x * c + r.vel.z * sn, r.vel.y, -r.vel.x * sn + r.vel.z * c);
   r.heading = wrapAngle(r.heading + turn);
+}
+
+/** Locks onto a rail when landing on its top, or riding onto a box from its end. */
+function lockOnRail(r: RiderState, prevY: number): boolean {
+  const assist = ASSIST[r.assist];
+  const tol = (assist.railAngleDeg * Math.PI) / 180;
+  for (let i = 0; i < RAILS.length; i++) {
+    if (i === r.offRail) continue;
+    const rail = RAILS[i];
+    const o = railOffset(rail, r.pos);
+    if (o.t < 0 || o.t > rail.length - 0.5 || Math.abs(o.side) > assist.railSnap) continue;
+    const top = railPoint(rail, o.t).y;
+    const landing = !r.grounded && r.vel.y <= 0.5 && prevY - top >= -0.05 && o.above <= 0.1;
+    const rideOn = r.grounded && rail.kind === 'box' && o.above <= 0 && o.above >= -RAIL.stepUp && o.t < 1.5;
+    if (!landing && !rideOn) continue;
+    // Has to be travelling along the rail, not across it.
+    const along = dot(r.vel, rail.dir);
+    if (along < RAIL.stallSpeed || along < 0.7 * Math.hypot(r.vel.x, r.vel.z)) continue;
+    const a = Math.abs(wrapAngle(r.heading - rail.heading));
+    const straightErr = Math.min(a, Math.PI - a);
+    const slideErr = Math.abs(a - Math.PI / 2);
+    if (straightErr > tol && slideErr > tol) continue;
+    const slide = slideErr < straightErr;
+    // Square up to the rail: straight along it (either way) or across it, whichever is closer.
+    const rel = wrapAngle(r.heading - rail.heading);
+    const snapped = slide ? Math.sign(rel || 1) * (Math.PI / 2) : Math.abs(rel) < Math.PI / 2 ? 0 : Math.PI;
+    r.heading = wrapAngle(rail.heading + snapped);
+    r.rail = { index: i, t: o.t, speed: along, balance: 0, balanceVel: 0, time: 0, slide, worst: 0 };
+    r.pos = railPoint(rail, o.t);
+    r.vel = scale(rail.dir, along);
+    r.grounded = true;
+    r.pitch = 0;
+    r.spinVel = r.flipVel = 0;
+    r.grab = null;
+    r.edge = 0;
+    r.skidding = r.braking = r.tucking = false;
+    r.air = emptyAirLog();
+    return true;
+  }
+  return false;
+}
+
+/** Sliding along a rail: gravity and friction set the speed; A/D keep the rider balanced on top. */
+function stepRail(r: RiderState, input: RideInput, dt: number): void {
+  const g = r.rail!;
+  const rail = RAILS[g.index];
+  const assist = ASSIST[r.assist];
+  g.time += dt;
+  const friction = (rail.kind === 'box' ? RAIL.boxFriction : RAIL.railFriction) * (g.slide ? RAIL.slideFriction : 1);
+  const drag = SPORTS[r.sport].airDrag * g.speed * g.speed;
+  g.speed += (-WORLD.gravity * rail.dir.y - friction * WORLD.gravity - drag) * dt;
+
+  // The rider tips further the more off-centre they are, plus a wobble that grows with speed.
+  // A leans left and D leans right, so the rider pushes back toward the middle.
+  const wobbleSize = RAIL.wobble * assist.railWobble * Math.min(1.6, Math.max(0.5, g.speed / 10));
+  const wobble = wobbleSize * (Math.sin(g.time * 2.3 + g.index * 1.7) + 0.6 * Math.sin(g.time * 5.3 + g.index));
+  const lean = ((input.left ? 1 : 0) - (input.right ? 1 : 0)) * RAIL.correct;
+  const tip = RAIL.tip * (0.5 + 0.5 * assist.railWobble);
+  g.balanceVel += (tip * g.balance + wobble + lean) * dt;
+  g.balanceVel -= g.balanceVel * RAIL.damping * dt;
+  g.balance += g.balanceVel * dt;
+  g.worst = Math.max(g.worst, Math.abs(g.balance));
+
+  g.t += g.speed * dt;
+  r.pos = railPoint(rail, Math.min(g.t, rail.length));
+  r.vel = scale(rail.dir, g.speed);
+  r.edge = 0;
+
+  if (Math.abs(g.balance) >= 1) {
+    // Lost it: slip off the side the rider was tipping toward.
+    const side = Math.sign(g.balance);
+    const left = vec(rail.dir.z, 0, -rail.dir.x);
+    leaveRail(r, 0, scale(normalize(left), side * RAIL.slipSpeed), false);
+    r.offRail = g.index;
+    if (assist.railFallCrash) crash(r);
+    return;
+  }
+  if (input.jump) {
+    r.jumpHeld = true;
+    r.charge = Math.min(1, r.charge + dt / RIDE.popChargeTime);
+  } else if (r.jumpHeld) {
+    leaveRail(r, RIDE.popMin + (RIDE.popMax - RIDE.popMin) * r.charge, vec(), true);
+    return;
+  }
+  if (g.t >= rail.length) leaveRail(r, RAIL.exitPop, vec(), true);
+  else if (g.speed < RAIL.stallSpeed) leaveRail(r, 0, vec(), true);
+}
+
+function leaveRail(r: RiderState, pop: number, push: Vec3, award: boolean): void {
+  const g = r.rail!;
+  const rail = RAILS[g.index];
+  const trick = award && g.time >= RAIL.minTime ? scoreGrind(r.sport, g.slide, g.time, g.worst) : null;
+  r.rail = null;
+  r.jumpHeld = false;
+  // Coming off a slide the rider turns back to straight (the nearer way), ready to land.
+  if (g.slide) {
+    const rel = wrapAngle(r.heading - rail.heading);
+    r.heading = wrapAngle(rail.heading + (Math.abs(rel) > Math.PI / 2 + 1e-6 ? Math.PI : 0));
+  }
+  takeOff(r);
+  r.air.rail = trick;
+  r.vel = add(add(scale(rail.dir, Math.max(0, g.speed)), push), vec(0, pop, 0));
 }
 
 export function resetToSafeSpot(r: RiderState): void {

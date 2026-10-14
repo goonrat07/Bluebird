@@ -89,6 +89,7 @@ test('landmarks down Kettle Run', async ({ page }) => {
   const spots: [string, number, number][] = [
     ['glade', 500, 30],
     ['park', 800, 0],
+    ['rails', 926, 13],
     ['wall', 1105, 0],
     ['finish', 1420, 0],
   ];
@@ -112,5 +113,21 @@ test('riding the glade builds Flow', async ({ page }) => {
   await page.screenshot({ path: 'test/artifacts/glade-flow.png' });
   const t = await telemetry(page);
   console.log(`glade: flow ${t.flow.toFixed(2)}, branch hits ${t.branchHits}, crashed ${t.crashed}`);
+  expect(errors).toEqual([]);
+});
+
+test('riding onto the park box grinds it', async ({ page }) => {
+  const errors: string[] = [];
+  await load(page, errors);
+  await page.evaluate(() => window.__game!.setAssist('relaxed'));
+  // The box starts at z 850, 13 m across from the centerline; ride straight at it.
+  await page.evaluate(() => window.__game!.teleport(842, 13, 8));
+  await page.waitForFunction(() => window.__game!.telemetry().rail !== null, null, { timeout: 60_000 });
+  const f = (await telemetry(page)).frame;
+  await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 3, f);
+  await page.screenshot({ path: 'test/artifacts/grind.png' });
+  const t = await telemetry(page);
+  console.log(`grinding ${t.rail}, balance ${t.balance.toFixed(2)}`);
+  await page.waitForFunction(() => window.__game!.telemetry().rail === null, null, { timeout: 60_000 });
   expect(errors).toEqual([]);
 });

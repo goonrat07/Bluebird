@@ -11,7 +11,10 @@ export class Hud {
   private readonly flowBar = document.getElementById('flow')!;
   private readonly flowFill = document.getElementById('flow-fill')!;
   private readonly splat = document.getElementById('splat')!;
+  private readonly balance = document.getElementById('balance')!;
+  private readonly balanceMark = document.getElementById('balance-mark')!;
   private trickTimer = 0;
+  private balanceShown = 0;
   private lastLanding = -1;
   private flowShown = 0;
   private splatLeft = 0;
@@ -29,6 +32,16 @@ export class Hud {
     }
     this.splatLeft = Math.max(0, this.splatLeft - dt);
     this.splat.style.opacity = String(Math.min(0.85, this.splatLeft * 1.6));
+  }
+
+  /** Balance bar while on a rail: the marker drifts toward the side you're tipping; lean back with A/D. */
+  updateBalance(dt: number, balance: number | null): void {
+    this.balance.classList.toggle('on', balance !== null);
+    if (balance === null) return;
+    this.balanceShown += (balance - this.balanceShown) * (1 - Math.exp(-20 * dt));
+    // Positive balance tips left, so the marker moves left.
+    this.balanceMark.style.transform = `translateX(${(-this.balanceShown * 100).toFixed(1)}px)`;
+    this.balance.classList.toggle('danger', Math.abs(balance) > 0.7);
   }
 
   update(dt: number, speedKmh: number, sport: Sport, assist: AssistLevel, trick: Trick | null, landings: number): void {

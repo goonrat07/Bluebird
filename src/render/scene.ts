@@ -4,6 +4,7 @@ import { TREES, treeBaseY } from '../sim/trees';
 import type { SnowType } from '../sim/tuning';
 import type { Vec3 } from '../sim/vec';
 import { RiderModel, type RiderPose } from './riderModel';
+import { buildPark } from './park';
 import { Spray } from './spray';
 import { PRESETS, type LightPreset } from './presets';
 import { Sky } from './sky';
@@ -22,6 +23,8 @@ export interface FrameView extends RiderPose {
   deepSnow: boolean;
   /** 0..1 Flow meter; widens the view a little. */
   flow: number;
+  /** On a rail or box: no tracks or spray in the snow. */
+  grinding: boolean;
 }
 
 // Per-snow-type tint on top of the preset's snow color: ice is glassy blue-gray, groomed a touch duller than powder.
@@ -93,7 +96,7 @@ export class SceneView {
 
     const mid = RUN.length / 2;
     this.peaks = buildPeaks(new THREE.Vector3(centerX(mid), heightAt(centerX(mid), mid), mid));
-    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), ...buildTrees(), this.trails.mesh, this.rider.root, this.spray.points);
+    this.scene.add(this.sky.mesh, this.peaks, buildSlope(this.snow.material), buildFinish(), buildPark(), ...buildTrees(), this.trails.mesh, this.rider.root, this.spray.points);
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
     this.applyPreset(PRESETS[0]);
     this.resize();
@@ -150,7 +153,7 @@ export class SceneView {
     this.updateCamera(v, dt, snap);
     this.sky.follow(this.camera);
     const at = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z);
-    this.trails.update(at, v.heading, v.sport === 'board' ? 0.32 : 0.4, v.deepSnow, v.grounded && !v.crashed && v.speed > 1);
+    this.trails.update(at, v.heading, v.sport === 'board' ? 0.32 : 0.4, v.deepSnow, v.grounded && !v.grinding && !v.crashed && v.speed > 1);
 
     // The shadow box follows the rider; the sun keeps its direction.
     this.sun.target.position.copy(at);
@@ -163,6 +166,7 @@ export class SceneView {
     const at = new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z);
     // Spray flies out sideways from the edge, away from the turn.
     const side = new THREE.Vector3(Math.cos(v.heading), 0, -Math.sin(v.heading)).multiplyScalar(-Math.sign(v.edge) || 1);
+    if (v.grinding) return;
     if (v.justLanded) this.spray.emit(at, side, 40, 1.5);
     if (!v.grounded || v.crashed || v.speed < 3) return;
     const intensity = v.skidding ? 1 : Math.abs(v.edge) > 0.6 && v.speed > 10 ? 0.4 : 0;

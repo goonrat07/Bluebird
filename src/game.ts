@@ -1,4 +1,5 @@
 import { WORLD, type AssistLevel } from './sim/tuning';
+import { RAILS } from './sim/rails';
 import { centerX, heightAt } from './sim/terrain';
 import { createRider, isSwitch, resetToSafeSpot, restart, speedOf, stepRider, swapSport, type RiderState } from './sim/rider';
 import { Keyboard, noInput, type Command, type RideInput } from './sim/input';
@@ -24,6 +25,10 @@ export interface Telemetry {
   fps: number;
   flow: number;
   branchHits: number;
+  /** Name of the rail or box being ridden, or null. */
+  rail: string | null;
+  /** -1..1 balance on a rail (0 when off one). */
+  balance: number;
 }
 
 const STEP = 1 / WORLD.stepHz;
@@ -109,6 +114,8 @@ export class Game {
       fps: this.fps,
       flow: r.flow,
       branchHits: r.branchHits,
+      rail: r.rail ? RAILS[r.rail.index].name : null,
+      balance: r.rail?.balance ?? 0,
     };
   }
 
@@ -144,7 +151,8 @@ export class Game {
         vel: r.vel,
         heading,
         pitch,
-        edge: r.edge,
+        // On a rail the body leans with the balance instead of an edge.
+        edge: r.rail ? r.rail.balance * 0.8 : r.edge,
         speed: speedOf(r),
         sport: r.sport,
         grounded: r.grounded,
@@ -159,6 +167,7 @@ export class Game {
         justLanded: landed,
         deepSnow: r.snow === 'powder',
         flow: r.flow,
+        grinding: r.rail !== null,
       },
       dt,
       this.snapCamera,
@@ -166,6 +175,7 @@ export class Game {
     this.snapCamera = false;
     this.hud.update(dt, speedOf(r) * 3.6, r.sport, r.assist, r.lastTrick, r.landings);
     this.hud.updateFlow(dt, r.flow, r.branchHits);
+    this.hud.updateBalance(dt, r.rail?.balance ?? null);
 
     this.frame++;
     requestAnimationFrame((t) => this.tick(t));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { scoreTrick, type AirLog } from '../../src/sim/tricks';
 
-const log = (over: Partial<AirLog>): AirLog => ({ spin: 0, flip: 0, grab: null, grabTime: 0, airTime: 1, switchTakeoff: false, ...over });
+const log = (over: Partial<AirLog>): AirLog => ({ spin: 0, flip: 0, grab: null, grabTime: 0, airTime: 1, switchTakeoff: false, rail: null, ...over });
 
 describe('trick names', () => {
   it('rounds spins to the nearest 180', () => {

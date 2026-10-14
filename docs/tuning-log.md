@@ -49,3 +49,15 @@ Phase 2 vertical slice: the glade on the skier's left between z 470 and 770.
 | Crashes and glancing hits | none → a crash empties Flow; a glancing hit keeps 30% | Flow is earned by clean lines. |
 | Gap sense (`ASSIST.gapSense`, `GAP`) | none → relaxed 1.4, normal 1.1, real 0 | Gently steers away from a trunk dead ahead, looking 0.8 s down the line. Bot bails across 15 glade lines drop from 35 on real to 15 on normal and 6 on relaxed. |
 | Glade camera | standard → 4 m up, 5.5 m back, looking 5 m ahead; FOV widens with Flow | The high run camera hides the gaps between trees. |
+
+## 2026-10-14 · Rails and boxes in the park
+
+A box and two rails in a lane on the skier's left of the park kickers (`RAIL` in `tuning.ts`, layout in `src/sim/rails.ts`).
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Lock-on | relaxed 1.1 m / 50°, normal 0.8 m / 38°, real 0.5 m / 25° | How close and how square you have to land on a rail; boxes can also be ridden straight onto. |
+| Balance tip, push, damping | 6, 8, 1.5 | With no input a rider comes off in about 1.3 s on real and 1.5 s on normal. On relaxed they last about 2 s, which clears the box and the flat rail. A/D push is stronger than the tip at the edge, so you can always recover. |
+| Wobble | 1.6 × (relaxed 0.45, normal 0.75, real 1) | The wobble you balance against grows with speed. |
+| Falling off | slip off on relaxed and normal, crash on real | Losing a rail shouldn't cost a run unless you asked for real. |
+| Score | 160 points per second, 1.4× for slides | A 50-50 or slide that you pop off into a spin scores both ("50-50 to Frontside 360"). |
