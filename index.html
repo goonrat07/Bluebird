@@ -10,8 +10,14 @@
   <body>
     <canvas id="game"></canvas>
     <div id="hud">
+      <div id="mode"></div>
+      <div id="trick"></div>
       <div id="speed">0 km/h</div>
-      <div id="help">A/D carve · W tuck · S brake · Space jump · R reset</div>
+      <div id="help">
+        A/D carve · W tuck · S brake · Space hold and release to jump<br />
+        In the air: A/D spin · W/S flip · Shift (+ direction) grab<br />
+        R reset · Backspace back to top · F skis/board · ` tuning
+      </div>
     </div>
     <script type="module" src="./src/main.ts"></script>
   </body>

@@ -11,3 +11,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fb8d6; }
 }
 #speed { position: absolute; right: 24px; bottom: 20px; font-size: 28px; font-weight: 600; letter-spacing: 0.02em; }
 #help { position: absolute; left: 24px; bottom: 20px; font-size: 14px; opacity: 0.85; }
+#mode { position: absolute; left: 24px; top: 20px; font-size: 14px; opacity: 0.9; }
+#help { line-height: 1.5; }
+#trick {
+  position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
+  text-align: center; opacity: 0; transition: none;
+}
+.trick-name { display: block; font-size: 30px; font-weight: 700; letter-spacing: 0.01em; }
+.trick-name.bail { opacity: 0.85; }
+.trick-score { display: block; font-size: 18px; opacity: 0.9; margin-top: 2px; }
+
+#tuning {
+  position: fixed; top: 12px; right: 12px; bottom: 12px; width: 320px; overflow-y: auto;
+  background: rgba(16, 22, 34, 0.82); color: #e8eef7; border-radius: 10px; padding: 10px 12px;
+  font: 12px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; pointer-events: auto;
+}
+#tuning[hidden] { display: none; }
+.tuning-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tuning-header span { opacity: 0.6; margin-right: auto; }
+#tuning button {
+  background: #2c3a52; color: inherit; border: 1px solid #44567a; border-radius: 6px; padding: 3px 8px; cursor: pointer;
+}
+#tuning summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
+#tuning label { display: grid; grid-template-columns: 1fr 110px 52px; align-items: center; gap: 6px; padding: 1px 0; }
+#tuning output { text-align: right; font-variant-numeric: tabular-nums; }
