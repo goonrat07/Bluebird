@@ -29,3 +29,11 @@ Player: "skiing switch messes up the leaning direction and it looks goofy… a s
 | Landing compression | none → 0.6 extra crouch, recovering in about 0.3 s | Touchdowns absorb instead of snapping upright. |
 | Lean amount | 0.7 × edge → 0.6 × edge | Less "lying on the snow" at moderate speeds. |
 | Camera (`CAMERA` in `scene.ts`) | 6.5 m back, 3 m up → 7 m back, 7.5 m up, looking down the hill | Higher view between Riders Republic and Grand Mountain Adventure. Camera and body values are now in the tuning panel. |
+
+## 2026-10-14 · Held keys carry into the air
+
+Player: "when i jump, if i was already holding like the a key, it doesn't turn to the left unless i release the key and press it again… do the same for W/S".
+
+| Change | Old → new | Why |
+| --- | --- | --- |
+| Keys held through takeoff | ignored until pressed again → act immediately | Pre-loading a spin by holding A/D before the lip is how the player wants to ride. W/S follow the same rule, so a tuck held off a jump starts a frontflip. |

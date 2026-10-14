@@ -38,8 +38,6 @@ export interface RiderState {
   flipVel: number;
   grab: string | null;
   air: AirLog;
-  /** Direction keys still held from the ground; they only spin or flip once released and pressed again. */
-  airLock: { left: boolean; right: boolean; up: boolean; down: boolean };
 
   crashed: boolean;
   crashTimer: number;
@@ -78,7 +76,6 @@ export function createRider(sport: Sport = 'board', assist: AssistLevel = 'norma
     flipVel: 0,
     grab: null,
     air: emptyAirLog(),
-    airLock: { left: false, right: false, up: false, down: false },
     crashed: false,
     crashTimer: 0,
     safeSpots: [{ pos: { ...pos }, heading: 0 }],
@@ -157,7 +154,6 @@ function stepGround(r: RiderState, input: RideInput, dt: number): void {
   const newLat = latMag > 1e-9 ? scale(lateral, latLeft / latMag) : vec();
   r.vel = add(add(scale(travel, newAlong), newLat), normalPart);
   r.braking = input.down;
-  r.airLock = { left: input.left, right: input.right, up: input.up, down: input.down };
   r.skidding = r.braking || latLeft > 1.0;
 
   // Friction, air drag and powder all slow the rider down.
@@ -218,9 +214,6 @@ function grabDirection(input: RideInput): GrabDir {
 }
 
 function stepAir(r: RiderState, input: RideInput, dt: number): void {
-  // Keys held through takeoff (a tuck, a carve) don't start a flip or spin by accident.
-  const lock = r.airLock;
-  for (const k of ['left', 'right', 'up', 'down'] as const) if (!input[k]) lock[k] = false;
   r.air.airTime += dt;
   const airSpeed = length(r.vel);
   const airDrag = SPORTS[r.sport].airDrag * airSpeed * airSpeed;
@@ -235,8 +228,8 @@ function stepAir(r: RiderState, input: RideInput, dt: number): void {
     r.air.grabTime += dt;
   } else {
     r.grab = null;
-    const spinKey = (input.left && !lock.left ? 1 : 0) - (input.right && !lock.right ? 1 : 0);
-    const flipKey = (input.up && !lock.up ? 1 : 0) - (input.down && !lock.down ? 1 : 0);
+    const spinKey = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+    const flipKey = (input.up ? 1 : 0) - (input.down ? 1 : 0);
     const snap = (ASSIST[r.assist].rotationSnapDeg * Math.PI) / 180;
     // Let go near a landable angle and the rotation finishes itself; otherwise it settles to a stop.
     const travel = travelHeading(r);
