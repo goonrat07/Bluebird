@@ -18,6 +18,10 @@ export interface RiderPose {
   grab: string | null;
   /** Riding backwards relative to the equipment. */
   switch: boolean;
+  /** On foot: the walk-cycle phase (rad), or null when clipped in. */
+  walk?: number | null;
+  /** Walking speed (m/s), so the stride stops when you stand still. */
+  walkSpeed?: number;
 }
 
 /** How quickly the body catches up with the equipment (1/s). Lower = more weight and lag. */
@@ -56,6 +60,12 @@ export class RiderModel {
   private readonly legs: THREE.Mesh[] = [];
   private readonly board = box(0.3, 0.05, 1.55, 0x2a3a55);
   private readonly skis = new THREE.Group();
+  /** Gear over the shoulder while walking. */
+  private readonly carried = new THREE.Group();
+  private readonly carriedBoard = box(0.3, 1.55, 0.05, 0x2a3a55);
+  private readonly carriedSkis = new THREE.Group();
+  private readonly jacketMat: THREE.MeshStandardMaterial;
+  private walking = false;
   private sport: Sport | null = null;
   private leanNow = 0;
   private crouchNow = 0.15;
@@ -87,6 +97,7 @@ export class RiderModel {
     this.torso.position.y = 0.8;
     this.hips.add(this.torso);
     const chest = box(0.5, 0.62, 0.3, jacket);
+    this.jacketMat = chest.material as THREE.MeshStandardMaterial;
     chest.position.y = 0.31;
     const head = box(0.3, 0.3, 0.3, skin);
     head.position.y = 0.82;
@@ -98,6 +109,7 @@ export class RiderModel {
     for (const [arm, side] of [[this.armLeft, 1], [this.armRight, -1]] as const) {
       arm.position.set(side * 0.33, 0.56, 0);
       const sleeve = box(0.14, 0.6, 0.16, jacket);
+      sleeve.material = this.jacketMat;
       sleeve.position.y = -0.28;
       arm.add(sleeve);
       this.torso.add(arm);
@@ -110,6 +122,24 @@ export class RiderModel {
       this.skis.add(ski);
     }
     this.lean.add(this.board, this.skis);
+
+    // Board slung on the back; skis together over the right shoulder.
+    this.carriedBoard.position.set(0, 0.35, -0.2);
+    this.carriedBoard.rotation.z = 0.5;
+    for (const side of [-1, 1]) {
+      const ski = box(0.08, 0.04, 1.75, 0x2a3a55);
+      ski.position.set(-0.28 + side * 0.05, 0.66, 0.05);
+      ski.rotation.x = -0.35;
+      this.carriedSkis.add(ski);
+    }
+    this.carried.add(this.carriedBoard, this.carriedSkis);
+    this.carried.visible = false;
+    this.torso.add(this.carried);
+  }
+
+  /** Jacket colour from the outfitters. */
+  setJacket(color: number): void {
+    this.jacketMat.color.set(color);
   }
 
   /** Turns this model into a see-through ghost that casts no shadow. */
@@ -133,13 +163,40 @@ export class RiderModel {
   update(p: RiderPose, dt: number): void {
     if (p.sport !== this.sport) {
       this.sport = p.sport;
-      this.board.visible = p.sport === 'board';
-      this.skis.visible = p.sport === 'ski';
-      // Snowboarders stand sideways to the board; skiers face forward.
-      this.stance.rotation.y = p.sport === 'board' ? -Math.PI / 2 : 0;
+      this.board.visible = !this.walking && p.sport === 'board';
+      this.skis.visible = !this.walking && p.sport === 'ski';
+      // Snowboarders stand sideways to the board; skiers face forward (and everyone walks forward).
+      this.stance.rotation.y = !this.walking && p.sport === 'board' ? -Math.PI / 2 : 0;
     }
 
     this.root.rotation.y = p.heading;
+
+    const walking = p.walk !== undefined && p.walk !== null;
+    if (walking !== this.walking) {
+      this.walking = walking;
+      this.board.visible = !walking && p.sport === 'board';
+      this.skis.visible = !walking && p.sport === 'ski';
+      this.carried.visible = walking;
+      this.stance.rotation.y = !walking && p.sport === 'board' ? -Math.PI / 2 : 0;
+    }
+    if (walking) {
+      this.carriedBoard.visible = p.sport === 'board';
+      this.carriedSkis.visible = p.sport === 'ski';
+      this.flip.rotation.set(0, 0, 0);
+      this.lean.rotation.z = this.leanNow = 0;
+      this.torso.rotation.y = 0;
+      this.setCrouch(0);
+      // Legs and arms swing in opposition with each step.
+      const stride = Math.min(1, (p.walkSpeed ?? 0) / 1.5) * 0.55;
+      const s = Math.sin(p.walk!) * stride;
+      this.legs[0].rotation.x = s;
+      this.legs[1].rotation.x = -s;
+      this.armLeft.rotation.set(-s * 0.8, 0, 0.12);
+      this.armRight.rotation.set(s * 0.8, 0, -0.12);
+      return;
+    }
+    for (const leg of this.legs) leg.rotation.x = 0;
+    this.armLeft.rotation.x = this.armRight.rotation.x = 0;
 
     if (p.crashed) {
       // Tumble while crashed: a loose spin that slows as the timer runs out.

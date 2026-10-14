@@ -181,6 +181,72 @@ test('lifts, the cat track and the trail map', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('the village: walking, shops and the dogs', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  await load(page, errors);
+  const frames = async (n: number) => {
+    const f = (await telemetry(page)).frame;
+    await page.waitForFunction(([f, n]) => window.__game!.telemetry().frame > f + n, [f, n]);
+  };
+  // Stand at the bottom of the run looking down at the lodge and its terrace crowd.
+  await page.evaluate(() => window.__game!.placeAt(44, 1556));
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => window.__game!.telemetry().walking);
+  await frames(10);
+  await page.screenshot({ path: 'test/artifacts/village.png' });
+
+  // Outside the rental shop: step out of the bindings and walk in to the counter.
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => !window.__game!.telemetry().walking);
+  await page.evaluate(() => window.__game!.placeAt(-48, 1566));
+  await frames(3);
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => window.__game!.telemetry().walking);
+  // Face downhill (into the shop) is the default heading; walk until inside at the counter.
+  await page.keyboard.down('KeyW');
+  await page.waitForFunction(() => window.__game!.telemetry().prompt.includes('swap'), null, { timeout: 60_000 });
+  await page.keyboard.up('KeyW');
+  const shop = await telemetry(page);
+  expect(shop.inside).toBe('rental');
+  const sport = shop.sport;
+  await page.keyboard.press('KeyE');
+  await page.waitForFunction((s) => window.__game!.telemetry().sport !== s, sport);
+  await frames(3);
+  await page.screenshot({ path: 'test/artifacts/rental-shop.png' });
+
+  // Clip back in by the door, ride over to the lodge and warm up by the fire.
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => !window.__game!.telemetry().walking);
+  await page.evaluate(() => window.__game!.placeAt(48, 1580));
+  await frames(3);
+  await page.keyboard.press('KeyB');
+  await page.keyboard.down('KeyW');
+  await page.waitForFunction(() => window.__game!.telemetry().prompt.includes('fire'), null, { timeout: 90_000 });
+  await page.keyboard.up('KeyW');
+  await frames(3);
+  await page.screenshot({ path: 'test/artifacts/lodge-inside.png' });
+
+  // Pet Pepper in the village; she tags along.
+  const pepper = (await telemetry(page)).dogs.find((d) => d.name === 'Pepper')!;
+  await page.evaluate(([x, z]) => window.__game!.placeAt(x + 1.2, z), [pepper.x, pepper.z]);
+  await frames(2);
+  expect((await telemetry(page)).prompt).toContain('Pepper');
+  await page.keyboard.press('KeyE');
+  await page.waitForFunction(() => window.__game!.telemetry().dogs.find((d) => d.name === 'Pepper')!.following);
+  await frames(5);
+  await page.screenshot({ path: 'test/artifacts/pepper.png' });
+
+  // Bowie waits at the patrol hut by the top of the Summit Chair.
+  // Step out of the bindings so you don't slide off down the summit.
+  await page.evaluate(() => window.__game!.placeAt(22.5, -447));
+  await page.keyboard.press('KeyB');
+  await page.waitForFunction(() => window.__game!.telemetry().walking);
+  await page.waitForFunction(() => window.__game!.telemetry().prompt.includes('Bowie'), null, { timeout: 60_000 });
+  await page.screenshot({ path: 'test/artifacts/bowie.png' });
+  expect(errors).toEqual([]);
+});
+
 test('riding the glade builds Flow', async ({ page }) => {
   test.setTimeout(180_000); // the glade is the heaviest view for a software renderer
   const errors: string[] = [];

@@ -23,6 +23,10 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `CAT_TRACKS` in `terrain.ts` – Summit Road, a groomed bench cut into the mountain; it overrides the snow within its shoulders.
 - `src/sim/lifts.ts` – chairlifts (Kettle Express, Summit Chair): towers, cable, boarding (E), riding (hold W to hurry), unloading.
   Lifts are freeride only and never part of an event or replay. Drawn by `src/render/lifts.ts`; `src/ui/trailMap.ts` is the Tab map.
+- `src/sim/village.ts` – the base village (`BASE_AREA` in terrain.ts flattens it): buildings with walls and doors, shop counters,
+  terrace tables and crowd spots. `src/sim/walk.ts` is walking on foot (B), `src/sim/dogs.ts` is Bowie (summit patrol hut) and
+  Pepper (village, follows you once petted with E). Walking and dogs are freeride only, like lifts.
+  Drawn by `src/render/village.ts`, `crowd.ts` (instanced, cheers big landings) and `dogs.ts`.
 - `src/render/mountain.ts` – the terrain mesh: a fine ribbon per run plus a coarser forest grid and far apron, all in culled chunks.
 - `src/render/presets/` – time-of-day light presets (T cycles in game).
 - `src/sim/rails.ts` – park rails and boxes; grinding lives in `rider.ts`.

@@ -511,7 +511,27 @@ export function catTrackAt(x: number, z: number): CatTrack | null {
   return null;
 }
 
+/**
+ * The base area: below Kettle Run's finish the mountain levels out into a broad, smooth apron
+ * at Kettle's pitch, wide enough for the village, the lift plaza and the parking lot.
+ */
+export const BASE_AREA = { z0: 1470, ramp: 40, centerX: -8, halfWidth: 160, falloff: 40 };
+
+function baseWeight(x: number, z: number): number {
+  const B = BASE_AREA;
+  if (z <= B.z0) return 0;
+  const along = smooth(Math.min(1, (z - B.z0) / B.ramp));
+  const across = 1 - smooth(Math.min(1, Math.max(0, Math.abs(x - B.centerX) - B.halfWidth) / B.falloff));
+  return along * across;
+}
+
 export function heightAt(x: number, z: number): number {
+  const w = baseWeight(x, z);
+  const h = w < 1 ? mountainWithRoads(x, z) : 0;
+  return w > 0 ? h + (profileHeight(z) - h) * w : h;
+}
+
+function mountainWithRoads(x: number, z: number): number {
   const h = naturalHeight(x, z);
   if (x < CAT_BOX.x0 || x > CAT_BOX.x1 || z < CAT_BOX.z0 || z > CAT_BOX.z1) return h;
   let out = h;
@@ -568,6 +588,8 @@ export function isNearLip(x: number, z: number): boolean {
 
 export function snowAt(x: number, z: number): SnowType {
   if (catTrackAt(x, z)) return 'groomed';
+  // The village apron is packed down by everyone walking around on it.
+  if (baseWeight(x, z) > 0.5) return 'groomed';
   const { run, u } = runAt(x, z);
   if (Math.abs(u) > run.groomedHalfWidth) return 'powder';
   // Icy patches on the skier's right of Kettle Run's groomer, scraped off on the steeper pitches.
