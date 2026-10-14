@@ -9,8 +9,10 @@ test('the game loads and the rider can ride', async ({ page }) => {
   await page.waitForFunction(() => window.__game?.ready && window.__game.telemetry().frame > 30);
   await page.screenshot({ path: 'test/artifacts/start.png' });
 
+  // Wait on distance ridden, not wall-clock time: on slow software-rendered CI the
+  // simulation runs slower than real time, so a fixed wait covers less riding.
   await page.keyboard.down('KeyW');
-  await page.waitForTimeout(3000);
+  await page.waitForFunction(() => window.__game!.telemetry().pos.z > 30, null, { timeout: 30_000 });
   await page.keyboard.up('KeyW');
 
   const t = await page.evaluate(() => window.__game!.telemetry());
