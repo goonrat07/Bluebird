@@ -22,6 +22,13 @@ test('the game loads and the rider can ride', async ({ page }) => {
 
   const t = await telemetry(page);
   expect(t.speedKmh).toBeGreaterThan(15);
+  // Sound starts on the first key press; M mutes it.
+  expect(t.sound).toBe('running');
+  console.log(`sound level while riding: ${t.soundLevel.toFixed(3)}`);
+  expect(t.soundLevel).toBeGreaterThan(0.005);
+  await page.keyboard.press('KeyM');
+  expect((await telemetry(page)).sound).toBe('muted');
+  await page.keyboard.press('KeyM');
   console.log(`fps while riding: ${t.fps.toFixed(1)}`);
   await page.screenshot({ path: 'test/artifacts/riding.png' });
 

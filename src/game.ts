@@ -5,6 +5,7 @@ import { createRider, isSwitch, resetToSafeSpot, restart, speedOf, stepRider, sw
 import { Keyboard, noInput, type Command, type RideInput } from './sim/input';
 import { SceneView } from './render/scene';
 import { Hud } from './ui/hud';
+import { Sound } from './audio/sound';
 import { TuningPanel } from './ui/tuningPanel';
 import { type Vec3, add, scale, sub } from './sim/vec';
 
@@ -29,6 +30,10 @@ export interface Telemetry {
   rail: string | null;
   /** -1..1 balance on a rail (0 when off one). */
   balance: number;
+  /** Audio state: off until a key is pressed, then running (or muted). */
+  sound: string;
+  /** Loudness of the sound output right now (RMS). */
+  soundLevel: number;
 }
 
 const STEP = 1 / WORLD.stepHz;
@@ -47,6 +52,9 @@ export class Game {
   private readonly keyboard = new Keyboard(window);
   private readonly hud = new Hud();
   private readonly tuning = new TuningPanel();
+  private readonly sound = new Sound(window);
+  private heardLandings = 0;
+  private heardBranches = 0;
 
   constructor(private readonly view: SceneView) {
     this.keyboard.onCommand((c) => this.command(c));
@@ -65,6 +73,7 @@ export class Game {
     else if (c === 'swapSport') swapSport(this.rider);
     else if (c === 'toggleTuning') this.tuning.toggle();
     else if (c === 'cycleLight') this.view.cycleLight();
+    else if (c === 'toggleMute') this.sound.toggleMute();
     if (c === 'restart') this.view.clearTrails();
     if (c === 'reset' || c === 'restart') {
       this.prevPos = { ...this.rider.pos };
@@ -116,7 +125,26 @@ export class Game {
       branchHits: r.branchHits,
       rail: r.rail ? RAILS[r.rail.index].name : null,
       balance: r.rail?.balance ?? 0,
+      sound: this.sound.state,
+      soundLevel: this.sound.level(),
     };
+  }
+
+  /** Plays one-shot sounds for what just happened in a simulation step. */
+  private listen(wasGrounded: boolean, wasOnRail: boolean, popping: boolean): void {
+    const r = this.rider;
+    if (popping && !r.grounded && !r.jumpHeld) this.sound.pop();
+    if (r.rail && !wasOnRail) this.sound.railOn(RAILS[r.rail.index].kind);
+    else if (!wasGrounded && r.grounded && !r.crashed) this.sound.landing(r.air.airTime / 1.5);
+    if (r.landings !== this.heardLandings) {
+      this.heardLandings = r.landings;
+      if (r.lastTrick?.name === 'Bail') this.sound.bail();
+      else if (r.lastTrick) this.sound.trick(r.lastTrick.quality);
+    }
+    if (r.branchHits !== this.heardBranches) {
+      if (r.branchHits > this.heardBranches) this.sound.branch();
+      this.heardBranches = r.branchHits;
+    }
   }
 
   private tick(now: number): void {
@@ -132,8 +160,11 @@ export class Game {
       this.prevHeading = this.rider.heading;
       this.prevPitch = this.rider.pitch;
       const before = this.rider.grounded;
+      const wasOnRail = this.rider.rail !== null;
+      const popping = this.rider.jumpHeld && !input.jump;
       stepRider(this.rider, input, STEP);
       if (!before && this.rider.grounded) landed = true;
+      this.listen(before, wasOnRail, popping);
       this.accumulator -= STEP;
     }
     const alpha = this.accumulator / STEP;
@@ -176,6 +207,15 @@ export class Game {
     this.hud.update(dt, speedOf(r) * 3.6, r.sport, r.assist, r.lastTrick, r.landings);
     this.hud.updateFlow(dt, r.flow, r.branchHits);
     this.hud.updateBalance(dt, r.rail?.balance ?? null);
+    this.sound.update({
+      speed: speedOf(r),
+      grounded: r.grounded,
+      crashed: r.crashed,
+      edge: r.edge,
+      skidding: r.skidding,
+      snow: r.snow,
+      grind: r.rail ? RAILS[r.rail.index].kind : null,
+    });
 
     this.frame++;
     requestAnimationFrame((t) => this.tick(t));
