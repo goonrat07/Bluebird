@@ -40,6 +40,8 @@ test('jumping, spinning and landing produce a result', async ({ page }) => {
   const errors: string[] = [];
   await load(page, errors);
   await page.evaluate(() => window.__game!.setAssist('relaxed'));
+  // Start already moving: on a slow software renderer, building speed from a standstill can take minutes.
+  await page.evaluate(() => window.__game!.teleport(40, 0, 9));
   await page.waitForFunction(() => window.__game!.telemetry().speedKmh > 25, null, { timeout: 30_000 });
 
   // Hold for a number of rendered frames, not milliseconds, so a slow software renderer still sees the key.
