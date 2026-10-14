@@ -56,6 +56,8 @@ export class Game {
     else if (c === 'restart') restart(this.rider);
     else if (c === 'swapSport') swapSport(this.rider);
     else if (c === 'toggleTuning') this.tuning.toggle();
+    else if (c === 'cycleLight') this.view.cycleLight();
+    if (c === 'restart') this.view.clearTrails();
     if (c === 'reset' || c === 'restart') {
       this.prevPos = { ...this.rider.pos };
       this.prevHeading = this.rider.heading;
@@ -133,6 +135,7 @@ export class Game {
         grab: r.grab,
         switch: isSwitch(r),
         justLanded: landed,
+        deepSnow: r.snow === 'powder',
       },
       dt,
       this.snapCamera,

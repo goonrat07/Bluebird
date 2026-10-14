@@ -22,6 +22,7 @@ test('the game loads and the rider can ride', async ({ page }) => {
 
   const t = await telemetry(page);
   expect(t.speedKmh).toBeGreaterThan(15);
+  console.log(`fps while riding: ${t.fps.toFixed(1)}`);
   await page.screenshot({ path: 'test/artifacts/riding.png' });
 
   // Carve hard and look at the spray.
@@ -41,8 +42,10 @@ test('jumping, spinning and landing produce a result', async ({ page }) => {
   await page.evaluate(() => window.__game!.setAssist('relaxed'));
   await page.waitForFunction(() => window.__game!.telemetry().speedKmh > 25, null, { timeout: 30_000 });
 
+  // Hold for a number of rendered frames, not milliseconds, so a slow software renderer still sees the key.
+  const holdFrom = (await telemetry(page)).frame;
   await page.keyboard.down('Space');
-  await page.waitForTimeout(450);
+  await page.waitForFunction((f) => window.__game!.telemetry().frame > f + 20, holdFrom);
   await page.keyboard.up('Space');
   await page.waitForFunction(() => !window.__game!.telemetry().grounded, null, { timeout: 5_000 });
   await page.keyboard.down('KeyA');
@@ -68,5 +71,11 @@ test('skis swap in and the tuning panel opens', async ({ page }) => {
   await page.locator('#tuning summary').first().click();
   await page.waitForTimeout(300);
   await page.screenshot({ path: 'test/artifacts/skis-tuning.png' });
+
+  // The style guide asks for every look at golden hour (the default) and at noon.
+  await page.keyboard.press('Backquote');
+  await page.keyboard.press('KeyT');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: 'test/artifacts/noon.png' });
   expect(errors).toEqual([]);
 });
