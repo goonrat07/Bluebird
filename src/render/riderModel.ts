@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Sport } from '../sim/tuning';
 import { SPORTS } from '../sim/tuning';
+import { heightAt, normalAt } from '../sim/terrain';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PALETTE } from './toon';
 import { painted, riderAsset } from './characterAssets';
@@ -49,7 +50,18 @@ export const BODY = {
   /** Extra crouch on touchdown, recovering over about a third of a second. */
   landingSquash: 0.6,
   landingRecover: 6,
+  /** The equipment lies flat on the snow underfoot, settling at this rate (1/s), and eases level in the air. */
+  ground: 14,
+  groundAir: 3,
+  /** The body stays nearer upright than the slope: it leans back this share of the pitch on steeps,
+   * and keeps this share of upright when traversing (angulating into the hill). */
+  slopeLeanBack: 0.15,
+  slopeAngulate: 0.6,
 };
+
+const UP = new THREE.Vector3(0, 1, 0);
+const groundN = new THREE.Vector3();
+const groundQ = new THREE.Quaternion();
 
 const follow = (current: number, target: number, rate: number, dt: number): number =>
   current + (target - current) * (1 - Math.exp(-rate * dt));
@@ -97,9 +109,12 @@ const tmpE = new THREE.Euler();
 
 // The rider modelled in Blender (tools/blender/characters.py) after the Tiny Bookshop look: natural
 // proportions, softly painted, posed bone by bone. Nested groups do the big moves:
-// yaw (heading) -> flip (pitch) -> lean (edge) -> stance (sideways for a board) -> the rigged body.
+// yaw (heading) -> ground (the slope underfoot) -> flip (pitch) -> lean (edge) -> equipment, and
+// -> upright (the body standing back from the slope) -> stance (sideways for a board) -> the rigged body.
 export class RiderModel {
   readonly root = new THREE.Group();
+  private readonly ground = new THREE.Group();
+  private readonly upright = new THREE.Group();
   private readonly flip = new THREE.Group();
   private readonly lean = new THREE.Group();
   private readonly stance = new THREE.Group();
@@ -131,9 +146,11 @@ export class RiderModel {
     // Flip around the rider's middle, not their feet.
     this.flip.position.y = 0.9;
     this.lean.position.y = -0.9;
-    this.root.add(this.flip);
+    this.root.add(this.ground);
+    this.ground.add(this.flip);
     this.flip.add(this.lean);
-    this.lean.add(this.stance);
+    this.lean.add(this.upright);
+    this.upright.add(this.stance);
 
     this.model = cloneSkinned(riderAsset().scene);
     this.model.position.y = 0.05; // boots on top of the board
@@ -265,6 +282,25 @@ export class RiderModel {
     });
   }
 
+  /** Lays the equipment on the slope underfoot, and stands the body back toward upright. */
+  private followGround(p: RiderPose, dt: number): void {
+    const { x, y, z } = this.root.position;
+    // Only on the snow itself: not on a chair, a rail or a box, nor walking or tumbling.
+    const onSnow = p.grounded && !p.crashed && !(p.walk !== undefined && p.walk !== null) && y - heightAt(x, z) < 0.2;
+    if (onSnow) {
+      const n = normalAt(x, z);
+      // The normal in the rider's own frame (turned by heading).
+      groundN.set(n.x, n.y, n.z).applyAxisAngle(UP, -this.root.rotation.y);
+      groundQ.setFromUnitVectors(UP, groundN);
+    } else groundQ.identity();
+    this.ground.quaternion.slerp(groundQ, 1 - Math.exp(-(onSnow ? BODY.ground : BODY.groundAir) * dt));
+    // How far the snow underfoot pitches (nose down, +) and rolls, from the settled ground tilt.
+    groundN.copy(UP).applyQuaternion(this.ground.quaternion);
+    const pitch = Math.atan2(groundN.z, groundN.y);
+    const roll = Math.atan2(-groundN.x, groundN.y);
+    this.upright.rotation.set(-pitch * BODY.slopeLeanBack, 0, -roll * BODY.slopeAngulate);
+  }
+
   update(p: RiderPose, dt: number): void {
     if (p.sport !== this.sport) {
       this.sport = p.sport;
@@ -276,6 +312,7 @@ export class RiderModel {
     }
 
     this.root.rotation.y = p.heading;
+    this.followGround(p, dt);
 
     const walking = p.walk !== undefined && p.walk !== null;
     if (walking !== this.walking) {

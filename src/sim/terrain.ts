@@ -228,7 +228,7 @@ const SPECS: RunSpec[] = [
   },
 ];
 
-/** A run other than Kettle, with its centerline and pitch baked into 1 m tables. */
+/** A run other than Kettle, with its centerline and pitch baked into 1 m tables (read smoothly between entries). */
 class Run {
   readonly id: string;
   readonly name: string;
@@ -277,22 +277,24 @@ class Run {
     }
   }
 
-  private index(z: number): number {
-    return Math.min(this.cx.length - 1, Math.max(0, Math.round(z - this.from)));
+  /** Reads a 1 m table at z, interpolating between its entries so the run has no steps. */
+  private sample(table: Float64Array, z: number): number {
+    const f = Math.min(table.length - 1, Math.max(0, z - this.from));
+    const i = Math.min(table.length - 2, Math.floor(f));
+    return table[i] + (table[i + 1] - table[i]) * (f - i);
   }
 
   centerX(z: number): number {
-    return this.cx[this.index(z)];
+    return this.sample(this.cx, z);
   }
 
   /** Distance across the run from its centerline (positive = skier's left). */
   lateral(x: number, z: number): number {
-    const i = this.index(z);
-    return (x - this.cx[i]) * this.square[i];
+    return (x - this.centerX(z)) * this.sample(this.square, z);
   }
 
   centerHeight(z: number): number {
-    return this.hc[this.index(z)];
+    return this.sample(this.hc, z);
   }
 
   /** How far outside the run's corridor a point is (negative inside), counting past its ends too. */

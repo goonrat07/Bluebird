@@ -185,7 +185,7 @@ test('lifts, the cat track and the trail map', async ({ page }) => {
 });
 
 test('the village: walking, shops and the dogs', async ({ page }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000); // walks the whole village, then the summit, in software GL
   const errors: string[] = [];
   await load(page, errors);
   const frames = async (n: number) => {
