@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CAT_TRACKS, type CatTrack, MOUNTAIN_BOUNDS, RUNS, type RunInfo, heightAt, isNearLip, onKicker, snowAt } from '../sim/terrain';
 import type { SnowType } from '../sim/tuning';
+import { rockAttribute } from './surfaceDetail';
 
 // Kettle Peak's snow, built in chunks so the parts behind the camera are culled.
 // Each run gets a fine grid laid along its own centerline, so its curves, kickers and banks
@@ -88,15 +89,20 @@ function grid(rows: number, cols: number, place: (r: number, k: number) => [numb
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   // Bare rock where it's too steep to hold snow, from the mesh's own normals (cheaper than sampling).
+  // The same weight tells the shader where to lay scanned rock (surfaceDetail.ts).
   const normals = geo.attributes.normal.array;
+  const rock = new Float32Array(colors.length / 3);
   for (let i = 0; i < colors.length; i += 3) {
     const up = normals[i + 1];
     if (up >= ROCK.from) continue;
-    c.setRGB(colors[i], colors[i + 1], colors[i + 2]).lerp(ROCK_TINT, Math.min(1, (ROCK.from - up) / (ROCK.from - ROCK.bare)));
+    const w = Math.min(1, (ROCK.from - up) / (ROCK.from - ROCK.bare));
+    rock[i / 3] = w;
+    c.setRGB(colors[i], colors[i + 1], colors[i + 2]).lerp(ROCK_TINT, w);
     colors[i] = c.r;
     colors[i + 1] = c.g;
     colors[i + 2] = c.b;
   }
+  rockAttribute(geo, rock);
   return geo;
 }
 

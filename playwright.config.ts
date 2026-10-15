@@ -14,7 +14,8 @@ export default defineConfig({
     launchOptions: {
       executablePath,
       // Software WebGL so the game renders on machines without a GPU (CI, cloud sessions).
-      args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+      // PW_GPU=1 uses the machine's own graphics card instead, which is far faster and shows the full lighting.
+      args: process.env.PW_GPU ? ['--ignore-gpu-blocklist'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
     },
   },
   webServer: {

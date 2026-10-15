@@ -16,7 +16,8 @@ import { PRESETS, blendPresets, type LightPreset } from './presets';
 import { WEATHERS, Snowfall, withWeather, type Weather } from './weather';
 import { Lamps } from './lamps';
 import { Sky } from './sky';
-import { buildPeaks, tintPeaks } from './peaks';
+import { buildPeaks } from './peaks';
+import { surfaceDetail } from './surfaceDetail';
 import { createSnowMaterial } from './snowMaterial';
 import { Trails } from './trails';
 import { PostEffects } from './post';
@@ -164,7 +165,9 @@ export class SceneView {
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
     // Sky light from an environment map costs a lot per pixel on a software renderer (CI, machines without a
     // GPU), so there the hemisphere light stands in for it. ?quality=high forces the full path.
+    // The scanned snow and rock detail goes the same way.
     if (!softwareRenderer(this.renderer)) this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    else surfaceDetail.enabled = false;
     this.envSky.mesh.scale.setScalar(100);
     this.envScene.add(this.envSky.mesh);
     this.applyPreset(this.targetLook());
@@ -251,7 +254,6 @@ export class SceneView {
     this.envSky.apply(p, this.sunDir, stars, w.overcast);
     this.envIntensity = p.envIntensity;
     this.envStale = true;
-    tintPeaks(this.peaks, p.fogColor);
   }
 
   /** Re-renders the sky into the environment light, at most a few times a second while the look eases. */
