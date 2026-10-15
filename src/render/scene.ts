@@ -73,6 +73,18 @@ export const CAMERA = {
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
 // Mid-century ski poster meets low-poly: low warm sun, lavender shade, haze on distant peaks.
+/** How strongly the hemisphere light stands in for the sky's environment light where that is switched off. */
+const ENV_AS_HEMI = 1.4;
+
+function softwareRenderer(renderer: THREE.WebGLRenderer): boolean {
+  const q = new URLSearchParams(location.search).get('quality');
+  if (q) return q === 'low';
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  return /swiftshader|llvmpipe|software/i.test(name);
+}
+
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -112,6 +124,14 @@ export class SceneView {
   private look: LightPreset = PRESETS[0];
   private lookFrom: LightPreset = PRESETS[0];
   private lookBlend = 1;
+  /** The sky rendered into an environment map, so it lights and reflects off everything (refreshed as the look changes). */
+  private readonly envSky = new Sky();
+  private readonly envScene = new THREE.Scene();
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envTarget: THREE.WebGLRenderTarget | null = null;
+  private envStale = true;
+  private envAge = 0;
+  private envIntensity = 1;
   private time = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -142,6 +162,11 @@ export class SceneView {
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
+    // Sky light from an environment map costs a lot per pixel on a software renderer (CI, machines without a
+    // GPU), so there the hemisphere light stands in for it. ?quality=high forces the full path.
+    if (!softwareRenderer(this.renderer)) this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.envSky.mesh.scale.setScalar(100);
+    this.envScene.add(this.envSky.mesh);
     this.applyPreset(this.targetLook());
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -214,15 +239,33 @@ export class SceneView {
     this.sun.intensity = p.sunIntensity;
     this.hemi.color.set(p.skyLight);
     this.hemi.groundColor.set(p.groundLight);
-    this.hemi.intensity = p.ambientIntensity;
+    this.hemi.intensity = p.ambientIntensity + (this.pmrem ? 0 : p.envIntensity * ENV_AS_HEMI);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.set(p.fogColor);
     fog.density = p.fogDensity;
     this.snow.material.color.set(p.snow);
     this.snow.setSparkle(p.sparkle);
     this.renderer.toneMappingExposure = p.exposure;
-    this.sky.apply(p, this.sunDir, Math.max(0, p.lamps * 2 - 1) * (1 - w.overcast));
+    const stars = Math.max(0, p.lamps * 2 - 1) * (1 - w.overcast);
+    this.sky.apply(p, this.sunDir, stars, w.overcast);
+    this.envSky.apply(p, this.sunDir, stars, w.overcast);
+    this.envIntensity = p.envIntensity;
+    this.envStale = true;
     tintPeaks(this.peaks, p.fogColor);
+  }
+
+  /** Re-renders the sky into the environment light, at most a few times a second while the look eases. */
+  private refreshEnvironment(dt: number): void {
+    this.envAge += dt;
+    if (!this.pmrem || !this.envStale || (this.lookBlend < 1 && this.envAge < 0.4)) return;
+    this.envSky.tick(this.time);
+    const next = this.pmrem.fromScene(this.envScene, 0, 0.1, 1000);
+    this.envTarget?.dispose();
+    this.envTarget = next;
+    this.scene.environment = next.texture;
+    this.scene.environmentIntensity = this.envIntensity;
+    this.envStale = false;
+    this.envAge = 0;
   }
 
   resize(): void {
@@ -278,6 +321,8 @@ export class SceneView {
     this.spray.update(dt);
     this.updateCamera(v, dt, snap);
     this.sky.follow(this.camera);
+    this.sky.tick(this.time);
+    this.refreshEnvironment(dt);
     if (this.lookBlend < 1) {
       // Ease through a change of light over a couple of seconds.
       this.lookBlend = Math.min(1, this.lookBlend + dt / 2);
