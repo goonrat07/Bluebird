@@ -256,6 +256,50 @@ def bake_pose(rig, objs):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+def simplify(body, voxel=0.01, iterations=40):
+    """Keeps the body's proportions but not its anatomy: rebuilt as an even voxel mesh (fingers, toes and
+    the face's small forms melt away), smoothed without shrinking, its bone weights carried over from the
+    nearest original vertices. Clothes grown from it come out as smooth, simple volumes."""
+    import bmesh
+    from mathutils.kdtree import KDTree
+
+    src = [(v.co.copy(), [(g.group, g.weight) for g in v.groups]) for v in body.data.vertices]
+    names = {g.index: g.name for g in body.vertex_groups}
+    m = body.modifiers.new("voxel", "REMESH")
+    m.mode = "VOXEL"
+    m.voxel_size = voxel
+    bpy.context.view_layer.objects.active = body
+    for o in bpy.context.view_layer.objects:
+        o.select_set(o == body)
+    bpy.ops.object.modifier_move_to_index(modifier="voxel", index=0)  # before the rig, which stays
+    bpy.ops.object.modifier_apply(modifier="voxel")
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    _taubin(bm, iterations, lam=0.6, mu=-0.63)
+    bm.to_mesh(body.data)
+    bm.free()
+    kd = KDTree(len(src))
+    for i, (c, _) in enumerate(src):
+        kd.insert(c, i)
+    kd.balance()
+    for g in list(body.vertex_groups):
+        body.vertex_groups.remove(g)
+    groups = {n: body.vertex_groups.new(name=n) for n in names.values()}
+    for v in body.data.vertices:
+        acc, total = defaultdict(float), 0.0
+        for _, i, d in kd.find_n(v.co, 4):
+            w = 1 / (d + 1e-3)
+            total += w
+            for gi, gw in src[i][1]:
+                acc[gi] += gw * w
+        for gi, w in acc.items():
+            if w / total > 0.01:
+                groups[names[gi]].add([v.index], w / total, "REPLACE")
+    for p in body.data.polygons:
+        p.use_smooth = True
+    _IRONED.clear()
+
+
 # ---------------------------------------------------------------------------------------------
 # Clothes and gear grown from the body itself, so they fit it: a region of the skin is copied, pushed out
 # by the cloth's thickness, smoothed so muscles don't show through, kept clear of the body, and given a rim.
@@ -319,9 +363,10 @@ def _ironed(body, iterations=80):
     return _IRONED[key]
 
 
-def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, keep_groups=True, clear=0.75, iron=True, drape=None, relax=None):
+def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, keep_groups=True, clear=0.75, iron=True, drape=None, relax=None, hem=None):
     """A garment from the body: `pick(i, co, bone)` chooses vertices, `thickness(co, bone)` how far it stands off.
-    `folds(co, bone)` can add a little more along the normal, for creases. Returns the new object."""
+    `folds(co, bone)` can add a little more along the normal, for creases. `hem=(below, z)` lays every edge
+    vertex lower than `below` at height `z`, for a straight hem. Returns the new object."""
     import bmesh
     from mathutils.bvhtree import BVHTree
 
@@ -376,6 +421,11 @@ def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, kee
     rims = [e for e in bm.edges if e.is_boundary]
     if rims:
         _taubin(bm, 30, movable=lambda v: v.is_boundary, edges=rims)
+    if hem:
+        below, z = hem
+        for v in bm.verts:
+            if v.is_boundary and v.co.z < below:
+                v.co.z = z
     # Smoothing shrinks the shell: keep it clear of the ironed body.
     for v in bm.verts:
         i = v[src]

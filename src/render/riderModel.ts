@@ -144,7 +144,7 @@ export class RiderModel {
   private readonly carried = new THREE.Group();
   private readonly carriedBoard = snowboard(BOARD_TOP);
   private readonly carriedSkis = new THREE.Group();
-  private readonly jacketMat: THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
+  private readonly jacketMat: THREE.MeshLambertMaterial;
   private walking = false;
   private sport: Sport | null = null;
   private leanNow = 0;
@@ -173,12 +173,17 @@ export class RiderModel {
     this.model.position.y = 0.05; // boots on top of the board
     this.model.updateMatrixWorld(true);
     // This rider's own jacket, so the outfitters can recolour it.
-    let jacket: THREE.MeshStandardMaterial | null = null;
+    let jacket: THREE.MeshLambertMaterial | null = null;
     this.model.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.castShadow = true;
         o.frustumCulled = false; // the posed body leaves its rest bounds
-        if ((o.material as THREE.Material).name === 'jacket') o.material = jacket ??= (o.material as THREE.MeshStandardMaterial).clone();
+        const mat = o.material as THREE.MeshLambertMaterial;
+        if (mat.name === 'jacket') {
+          // A fresh painted material (a clone would lose the painted shader's fill).
+          jacket ??= Object.assign(painted(mat.color.clone()), { name: 'jacket' });
+          o.material = jacket;
+        }
       }
       if (o instanceof THREE.Bone) {
         const frame = new THREE.Quaternion();

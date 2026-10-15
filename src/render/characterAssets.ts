@@ -21,10 +21,17 @@ export function painted(color: THREE.ColorRepresentation, fill = 0.18): THREE.Me
   return m;
 }
 
-/** The rider keeps its glTF materials (physically based, with the jacket's panels in vertex colour); it just casts shadows. */
+/** The rider's glTF materials become painted ones of the same colour and name (the skin's nose is redder in
+ * its vertex colours), and every piece casts a shadow. */
 function prepare(root: THREE.Object3D): void {
   root.traverse((o) => {
-    if (o instanceof THREE.Mesh) o.castShadow = true;
+    if (!(o instanceof THREE.Mesh)) return;
+    const src = o.material as THREE.MeshStandardMaterial;
+    const m = painted(src.color.clone());
+    m.name = src.name;
+    m.vertexColors = !!o.geometry.getAttribute('color');
+    o.material = m;
+    o.castShadow = true;
   });
 }
 
