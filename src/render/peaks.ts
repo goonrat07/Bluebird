@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { addSurfaceDetail, rockAttribute } from './surfaceDetail';
 
-const PEAKS = { lift: 1.5, sink: 300 };
+/** `floor` keeps even the lowest cols high enough that the ring always closes the horizon. */
+const PEAKS = { lift: 1.3, sink: 300, floor: 130 };
 const RING = { segments: 640, rows: 48, inner: 900, outer: 1700 };
 
 /** Snow holds where the face is gentler than this (normal's up component), fading out by `bare`. */
@@ -68,7 +69,7 @@ export function buildPeaks(center: THREE.Vector3): THREE.Mesh {
       const relief = ridged(x / 360, z / 360);
       const fall = Math.sin(((r - inner) / (outer - inner)) * Math.PI); // rises from the inner edge, falls off behind
       // Tall enough to stand over Kettle Peak's summit, and sunk at the inner edge so no sky shows beneath.
-      const h = (massif * (0.25 + 1.1 * relief) + relief * 180) * PEAKS.lift * fall - 120 - PEAKS.sink * (1 - fall);
+      const h = (massif * (0.25 + 1.1 * relief) + relief * 180 + PEAKS.floor) * PEAKS.lift * fall - 120 - PEAKS.sink * (1 - fall);
       positions.push(center.x + x, center.y + h, center.z + z);
     }
   }
