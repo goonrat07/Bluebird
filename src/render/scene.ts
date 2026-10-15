@@ -73,6 +73,18 @@ export const CAMERA = {
 const lerpAngle = (a: number, b: number, t: number): number => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
 // Mid-century ski poster meets low-poly: low warm sun, lavender shade, haze on distant peaks.
+/** How strongly the hemisphere light stands in for the sky's environment light where that is switched off. */
+const ENV_AS_HEMI = 1.4;
+
+function softwareRenderer(renderer: THREE.WebGLRenderer): boolean {
+  const q = new URLSearchParams(location.search).get('quality');
+  if (q) return q === 'low';
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  return /swiftshader|llvmpipe|software/i.test(name);
+}
+
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -150,7 +162,9 @@ export class SceneView {
     this.ghost.makeGhost();
     this.ghost.root.visible = false;
     this.post = new PostEffects(this.renderer, this.scene, this.camera);
-    this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    // Sky light from an environment map costs a lot per pixel on a software renderer (CI, machines without a
+    // GPU), so there the hemisphere light stands in for it. ?quality=high forces the full path.
+    if (!softwareRenderer(this.renderer)) this.pmrem = new THREE.PMREMGenerator(this.renderer);
     this.envSky.mesh.scale.setScalar(100);
     this.envScene.add(this.envSky.mesh);
     this.applyPreset(this.targetLook());
@@ -225,7 +239,7 @@ export class SceneView {
     this.sun.intensity = p.sunIntensity;
     this.hemi.color.set(p.skyLight);
     this.hemi.groundColor.set(p.groundLight);
-    this.hemi.intensity = p.ambientIntensity;
+    this.hemi.intensity = p.ambientIntensity + (this.pmrem ? 0 : p.envIntensity * ENV_AS_HEMI);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.set(p.fogColor);
     fog.density = p.fogDensity;

@@ -56,7 +56,9 @@ export class Sky {
     m.fog = false;
     this.mesh.scale.setScalar(1500);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = -1;
+    // Drawn after the opaque world: its vertices sit on the far plane, so the depth test skips every pixel the
+    // mountain already covers instead of running the scattering and cloud shader under it.
+    this.mesh.renderOrder = 1000;
   }
 
   apply(p: LightPreset, sunDir: THREE.Vector3, stars: number, overcast: number): void {
