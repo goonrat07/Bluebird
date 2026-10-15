@@ -9,6 +9,7 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
 - `npm test` – unit tests (Vitest, `test/unit`)
 - `npm run test:e2e` – browser play test (Playwright, `test/e2e`); screenshots land in `test/artifacts/`.
   In cloud sessions use the preinstalled Chromium: `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e` (never `playwright install` there).
+  On a machine with a graphics card, `PW_GPU=1` (PowerShell: `$env:PW_GPU=1`) runs it on the GPU: much faster, and it shows the full lighting.
 
 ## Layout
 - `src/sim/` – simulation only, no three.js: terrain, rider physics, input, tuning. Must stay deterministic
