@@ -19,6 +19,9 @@ export interface DetailScale {
   fade: [number, number];
 }
 
+/** Off on software renderers, where the extra texture reads per pixel cost too much; set before the first frame. */
+export const surfaceDetail = { enabled: true };
+
 let textures: { snowNormal: THREE.Texture; rockAlbedo: THREE.Texture; rockNormal: THREE.Texture } | null = null;
 
 function load(): NonNullable<typeof textures> {
@@ -49,6 +52,7 @@ export function addSurfaceDetail(material: THREE.MeshStandardMaterial, scale: De
   };
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
+
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float rock;\nvarying float vRock;\nvarying vec3 vDetailWorld;')
       .replace('#include <fog_vertex>', '#include <fog_vertex>\nvRock = rock;\nvDetailWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -77,6 +81,7 @@ export function addSurfaceDetail(material: THREE.MeshStandardMaterial, scale: De
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
+        #ifndef NO_SURFACE_DETAIL
         {
           // View space to world space and back: the view matrix is a rotation, so its transpose undoes it.
           detailWorldNormal = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
@@ -99,11 +104,13 @@ export function addSurfaceDetail(material: THREE.MeshStandardMaterial, scale: De
             bend += r * (vec3(0.0, x.y, x.x) * w.x + vec3(y.x, 0.0, y.y) * w.y + vec3(z.x, z.y, 0.0) * w.z);
           }
           normal = normalize((viewMatrix * vec4(normalize(detailWorldNormal + bend), 0.0)).xyz);
-        }`,
+        }
+        #endif`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        #ifndef NO_SURFACE_DETAIL
         if (vRock > 0.01) {
           // Rock grain: the scan's light and dark around the mesh's own rock colour, at two sizes.
           detailWorldNormal = normalize(vNormal * (gl_FrontFacing ? 1.0 : -1.0));
@@ -111,8 +118,10 @@ export function addSurfaceDetail(material: THREE.MeshStandardMaterial, scale: De
           vec3 w = rockWeights();
           float g = rockSample(rockAlbedo, vDetailWorld, w, rockTile.x).r * 0.65 + rockSample(rockAlbedo, vDetailWorld, w, rockTile.y).r * 0.35;
           diffuseColor.rgb *= mix(1.0, 0.35 + 1.3 * g, vRock);
-        }`,
+        }
+        #endif`,
       );
+    if (!surfaceDetail.enabled) shader.fragmentShader = '#define NO_SURFACE_DETAIL\n' + shader.fragmentShader;
     extra?.(shader);
   };
 }
