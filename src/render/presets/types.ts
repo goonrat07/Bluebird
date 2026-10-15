@@ -23,6 +23,14 @@ export interface LightPreset {
   exposure: number;
   /** Strength of the glitter on sunlit snow, 0..1. */
   sparkle: number;
+  /** Physical sky: haze in the air (2 crisp .. 10 hazy), blue scattering strength, cloud cover 0..1. */
+  turbidity: number;
+  rayleigh: number;
+  clouds: number;
+  /** How far the moonlit night sky replaces the daylight sky, 0..1. */
+  night: number;
+  /** How strongly the sky lights everything through reflections and ambient (image-based light). */
+  envIntensity: number;
   /** How much the night lights are on: lamp posts, lit windows, the headlamp and the stars. 0 by day, 1 at night. */
   lamps: number;
 }
