@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SPOTS, type Spot, insideOf } from '../sim/village';
 import { heightAt } from '../sim/terrain';
 import { PALETTE } from './toon';
-import { painted, villagerPart } from './characterAssets';
+import { villagerPart } from './characterAssets';
 
 // Villagers: people modelled in Blender (tools/blender/characters.py) after the Tiny Bookshop look,
 // sitting at the tables and standing in little groups. Every body pose and every hair or hat style is
@@ -26,15 +26,21 @@ const HATTED: Top[] = ['beanie', 'sunhat', 'cap'];
 const POSES = ['stand', 'sit', 'cheer', 'sitcheer'] as const;
 type Pose = (typeof POSES)[number];
 export const SIT_DROP = 0.45;
-type BodyMat = 'shirt' | 'forearm' | 'pants' | 'skin' | 'shoes';
+type BodyMat = 'shirt' | 'forearm' | 'pants' | 'skin' | 'shoes' | 'eyes';
+/** Two builds of body, a man's and a woman's, both in every pose. */
+const BUILDS = ['m', 'f'] as const;
+type Build = (typeof BUILDS)[number];
+type Body = `${Build}_${Pose}`;
 
 export interface Look {
+  build: Build;
   shirt: number;
   /** Long sleeves (the shirt colour) or short (skin). */
   forearm: number;
   pants: number;
   skin: number;
   shoes: number;
+  eyes: number;
   top: Top;
   topColor: number;
 }
@@ -45,26 +51,31 @@ export function villagerLook(i: number): Look {
   const shirt = SHIRTS[(i * 7 + 3) % SHIRTS.length];
   const skin = SKIN[(i * 3 + 2) % SKIN.length];
   return {
+    build: BUILDS[(i * 5 + 1) % 2],
     shirt,
     forearm: i % 3 === 1 ? skin : shirt,
     pants: PANTS[(i * 3 + 2) % PANTS.length],
     skin,
     shoes: SHOES[i % SHOES.length],
+    eyes: 0x2a2420,
     top,
     topColor: HATTED.includes(top) ? HATS[(i * 4 + 1) % HATS.length] : HAIR[(i * 5 + 1) % HAIR.length],
   };
 }
 
+/** Cloth and skin: physically based, matte; the colour comes from the look (per instance in the crowd). */
+const villagerMaterial = (color: number): THREE.MeshStandardMaterial => new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
+
 /** One villager as plain meshes (for the character sheet), standing or sitting. */
 export function villagerMeshes(look: Look, pose: Pose = 'stand'): THREE.Group {
   const g = new THREE.Group();
-  for (const [mat, geo] of villagerPart(`body_${pose}`)) {
-    const m = new THREE.Mesh(geo, painted(look[mat as BodyMat]));
+  for (const [mat, geo] of villagerPart(`body_${look.build}_${pose}`)) {
+    const m = new THREE.Mesh(geo, villagerMaterial(look[mat as BodyMat]));
     m.castShadow = true;
     g.add(m);
   }
   for (const geo of villagerPart(look.top).values()) {
-    const m = new THREE.Mesh(geo, painted(look.topColor));
+    const m = new THREE.Mesh(geo, villagerMaterial(look.topColor));
     m.position.y = pose.startsWith('sit') ? -SIT_DROP : 0;
     m.castShadow = true;
     g.add(m);
@@ -86,9 +97,12 @@ export class CrowdView {
   private readonly people: Person[];
   /** Per pose, one instanced mesh per material. Each frame every person is packed into the pose they
    * are in (count shrinks to fit), so nobody's other poses or hair styles cost anything to draw. */
-  private readonly bodies = new Map<Pose, { mesh: THREE.InstancedMesh; mat: BodyMat }[]>();
+  private readonly bodies = new Map<Body, { mesh: THREE.InstancedMesh; mat: BodyMat }[]>();
   private readonly tops = new Map<Top, THREE.InstancedMesh>();
   private time = 0;
+  /** The middle of the crowd, and how far from it they're still worth drawing (m). */
+  private readonly center = new THREE.Vector2();
+  private static readonly DRAW_RANGE = 450;
 
   constructor() {
     const n = SPOTS.length;
@@ -97,10 +111,12 @@ export class CrowdView {
       const y = indoor ? indoor.floor : heightAt(spot.x, spot.z);
       return { spot, y, sway: i * 1.7, cheer: 0, delay: 0, look: villagerLook(i) };
     });
-    const white = painted(0xffffff);
-    for (const pose of POSES) {
-      const meshes = [...villagerPart(`body_${pose}`)].map(([mat, geo]) => ({ mesh: new THREE.InstancedMesh(geo, white, n), mat: mat as BodyMat }));
-      this.bodies.set(pose, meshes);
+    const white = villagerMaterial(0xffffff);
+    for (const build of BUILDS) {
+      for (const pose of POSES) {
+        const meshes = [...villagerPart(`body_${build}_${pose}`)].map(([mat, geo]) => ({ mesh: new THREE.InstancedMesh(geo, white, n), mat: mat as BodyMat }));
+        this.bodies.set(`${build}_${pose}`, meshes);
+      }
     }
     for (const top of TOPS) {
       // Hair and hats never change, so each style holds only the people who wear it.
@@ -108,6 +124,8 @@ export class CrowdView {
       const geo = [...villagerPart(top).values()][0];
       this.tops.set(top, new THREE.InstancedMesh(geo, white, Math.max(1, wearers)));
     }
+    for (const p of this.people) this.center.add(new THREE.Vector2(p.spot.x, p.spot.z));
+    this.center.divideScalar(Math.max(1, this.people.length));
     for (const mesh of this.meshes()) {
       mesh.setColorAt(0, new THREE.Color(0xffffff)); // every mesh carries instance colours from the start
       mesh.castShadow = true;
@@ -134,8 +152,11 @@ export class CrowdView {
     return this.people.filter((p) => p.cheer > 0).length;
   }
 
-  update(dt: number): void {
+  /** `x, z`: where the viewer is; from far up the mountain the crowd isn't drawn at all. */
+  update(dt: number, x = this.center.x, z = this.center.y): void {
     this.time += dt;
+    this.root.visible = Math.hypot(x - this.center.x, z - this.center.y) < CrowdView.DRAW_RANGE;
+    if (!this.root.visible) return;
     const m = new THREE.Matrix4();
     const lifted = new THREE.Matrix4();
     const c = new THREE.Color();
@@ -162,7 +183,7 @@ export class CrowdView {
       pos.set(p.spot.x, p.y + hop, p.spot.z);
       m.compose(pos, q, one);
       const pose: Pose = sitting ? (cheering ? 'sitcheer' : 'sit') : cheering ? 'cheer' : 'stand';
-      for (const b of this.bodies.get(pose)!) put(b.mesh, m, p.look[b.mat]);
+      for (const b of this.bodies.get(`${p.look.build}_${pose}`)!) put(b.mesh, m, p.look[b.mat]);
       lifted.makeTranslation(0, sitting ? -SIT_DROP : 0, 0).premultiply(m);
       put(this.tops.get(p.look.top)!, lifted, p.look.topColor);
     });

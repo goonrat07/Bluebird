@@ -309,7 +309,7 @@ export class SceneView {
 
   render(v: FrameView, dt: number, snap = false): void {
     this.lifts.update(dt);
-    this.crowd.update(dt);
+    this.crowd.update(dt, v.pos.x, v.pos.z);
     this.village.showInside(v.inside);
     // Seated on a chair: its seat is just under the rider, its grip a hang above that.
     this.seat.visible = v.chair !== null;

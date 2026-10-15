@@ -6,22 +6,25 @@ Run headless with Blender's Python module (pip install bpy) from the repo root:
 Writes src/assets/models/rider.glb (a rigged rider the game poses bone by bone) and
 src/assets/models/villager.glb (posed villager bodies plus hair and hats, drawn instanced).
 
-The look follows the Tiny Bookshop reference shots: natural proportions (about seven and a half
-heads tall), smooth tapered limbs with knees, elbows, hands and feet, clothes that read by shape
-and colour, a plain face with a nose and ears, softly lit. Bodies are grown from a stick-figure
-skeleton with Blender's Skin modifier and smoothed with one level of subdivision.
+Everyone is grown from MakeHuman's CC0 base body (tools/blender/human.py, assets in
+tools/blender/makehuman): real proportions and faces, MakeHuman's own skin weights folded onto the
+game's bones. Clothes and gear are built from the body itself (shells offset from its skin, convex
+hulls for hard gear), so they fit, then decimated to a triangle budget. The rider follows the
+BMX Mountain reference for detail: a shell jacket with a darker yoke, ski trousers, boots, gloves,
+a helmet with goggles and a neck gaiter.
 
 Coordinates are Blender's: Z up, the character faces -Y, their left hand is at +X. The glTF
 exporter turns that into three.js's Y up with the character facing +Z.
 """
 
-import math
 import os
 import sys
 
 import bpy  # first: it makes bmesh and mathutils importable
 import bmesh
-from mathutils import Matrix, Vector
+from mathutils import Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "src", "assets", "models")
@@ -46,120 +49,7 @@ def material(name, hexcolor):
 
 
 # ---------------------------------------------------------------------------------------------
-# Skeletons: named points with a skin radius (across, front-to-back), and the edges joining them.
-
-
-def skeleton(pose="stand", build="rider"):
-    """Points and edges for a body. `pose` is stand, sit, cheer or sitcheer."""
-    puffy = 1.08 if build == "rider" else 1.0  # a ski jacket and ski trousers are fuller
-    sit = pose in ("sit", "sitcheer")
-    cheer = pose in ("cheer", "sitcheer")
-    pelvis_z = 0.5 if sit else 0.95
-    dz = pelvis_z - 0.95
-    p = {}
-    r = {}
-
-    def at(name, x, y, z, rx, ry=None):
-        p[name] = Vector((x, y, z + dz))
-        r[name] = (rx, ry if ry is not None else rx)
-
-    # Torso: hips a little wider than the waist, chest broadest, a short neck.
-    at("pelvis", 0, 0.005, 0.95, 0.165 * puffy, 0.12 * puffy)
-    at("waist", 0, 0.0, 1.08, 0.15 * puffy, 0.112 * puffy)
-    at("chest", 0, -0.008, 1.28, 0.19 * puffy, 0.125 * puffy)
-    at("neckbase", 0, 0.0, 1.45, 0.06, 0.058)
-    at("necktop", 0, 0.0, 1.53, 0.047)
-    for s, side in ((1, "L"), (-1, "R")):
-        # Legs: thigh, knee, calf, ankle, a foot pointing forward.
-        if sit:
-            at(f"hip{side}", s * 0.098, 0.0, 0.92, 0.1 * puffy)
-            at(f"knee{side}", s * 0.11, -0.42, 0.93, 0.072 * puffy)
-            at(f"calf{side}", s * 0.11, -0.44, 0.72, 0.066 * puffy)
-            at(f"ankle{side}", s * 0.11, -0.44, 0.09 - dz, 0.05)
-            at(f"toe{side}", s * 0.11, -0.58, 0.04 - dz, 0.05, 0.04)
-        else:
-            at(f"hip{side}", s * 0.098, 0.0, 0.92, 0.1 * puffy)
-            at(f"knee{side}", s * 0.1, -0.012, 0.5, 0.072 * puffy)
-            at(f"calf{side}", s * 0.1, 0.012, 0.36, 0.068 * puffy)
-            at(f"ankle{side}", s * 0.1, 0.01, 0.09, 0.05)
-            at(f"toe{side}", s * 0.1, -0.14, 0.04, 0.05, 0.04)
-        # Arms: shoulder, elbow, wrist, a flat hand. Cheering throws them up and out.
-        at(f"shoulder{side}", s * 0.215, 0.0, 1.41, 0.066 * puffy)
-        if cheer:
-            at(f"elbow{side}", s * 0.35, -0.03, 1.62, 0.054 * puffy)
-            at(f"wrist{side}", s * 0.42, -0.05, 1.86, 0.042)
-            at(f"hand{side}", s * 0.44, -0.05, 1.95, 0.052, 0.032)
-        else:
-            at(f"elbow{side}", s * 0.27, 0.012, 1.14, 0.054 * puffy)
-            at(f"wrist{side}", s * 0.29, -0.012, 0.9, 0.042)
-            at(f"hand{side}", s * 0.295, -0.02, 0.81, 0.052, 0.032)
-    edges = [("pelvis", "waist"), ("waist", "chest"), ("chest", "neckbase"), ("neckbase", "necktop")]
-    for side in "LR":
-        edges += [
-            ("pelvis", f"hip{side}"),
-            (f"hip{side}", f"knee{side}"),
-            (f"knee{side}", f"calf{side}"),
-            (f"calf{side}", f"ankle{side}"),
-            (f"ankle{side}", f"toe{side}"),
-            ("neckbase", f"shoulder{side}"),
-            (f"shoulder{side}", f"elbow{side}"),
-            (f"elbow{side}", f"wrist{side}"),
-            (f"wrist{side}", f"hand{side}"),
-        ]
-    return p, r, edges
-
-
-def apply_modifiers(obj):
-    bpy.context.view_layer.objects.active = obj
-    for o in bpy.context.view_layer.objects:
-        o.select_set(o == obj)
-    for m in list(obj.modifiers):
-        bpy.ops.object.modifier_apply(modifier=m.name)
-
-
-def skin_body(name, points, radii, edges):
-    names = list(points)
-    idx = {n: i for i, n in enumerate(names)}
-    me = bpy.data.meshes.new(name)
-    me.from_pydata([points[n] for n in names], [(idx[a], idx[b]) for a, b in edges], [])
-    obj = bpy.data.objects.new(name, me)
-    bpy.context.collection.objects.link(obj)
-    skin = obj.modifiers.new("skin", "SKIN")
-    skin.branch_smoothing = 0.6
-    skin.use_smooth_shade = True
-    for n, v in zip(names, me.skin_vertices[0].data):
-        v.radius = radii[n]
-    me.skin_vertices[0].data[idx["pelvis"]].use_root = True
-    sub = obj.modifiers.new("sub", "SUBSURF")
-    sub.levels = 1
-    sub.render_levels = 1
-    apply_modifiers(obj)
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
-    return obj
-
-
-def assign_regions(obj, mats, pick, cuts=()):
-    """Gives each face a material slot by where its centre is: pick(centre) -> material name.
-    The mesh is first sliced level at each height in `cuts`, so hems and cuffs are clean lines."""
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    for z in cuts:
-        geom = bm.verts[:] + bm.edges[:] + bm.faces[:]
-        bmesh.ops.bisect_plane(bm, geom=geom, plane_co=(0, 0, z), plane_no=(0, 0, 1))
-    bm.to_mesh(obj.data)
-    bm.free()
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
-    for m in mats:
-        obj.data.materials.append(m)
-    index = {m.name: i for i, m in enumerate(mats)}
-    for poly in obj.data.polygons:
-        poly.material_index = index[pick(obj.matrix_world @ poly.center)]
-
-
-# ---------------------------------------------------------------------------------------------
-# Small shapes: heads, hair, hats, gear. Each is built at the standing head and moved for sitters.
+# Small shapes for the bits a hull can't make: a bun, a pom-pom, a hat brim, a cap's peak.
 
 
 def sphere(name, loc, radius, scale=(1, 1, 1), segments=20, rings=14, cut=None):
@@ -195,35 +85,6 @@ def cylinder(name, loc, radius, depth, segments=24, scale=(1, 1, 1), rot=None):
     return obj
 
 
-def torus(name, loc, major, minor, scale=(1, 1, 1)):
-    me = bpy.data.meshes.new(name)
-    bm = bmesh.new()
-    seg, ring = 24, 10
-    verts = []
-    for i in range(seg):
-        a = 2 * math.pi * i / seg
-        for j in range(ring):
-            b = 2 * math.pi * j / ring
-            x = (major + minor * math.cos(b)) * math.cos(a)
-            y = (major + minor * math.cos(b)) * math.sin(a)
-            z = minor * math.sin(b)
-            verts.append(bm.verts.new((x * scale[0] + loc[0], y * scale[1] + loc[1], z * scale[2] + loc[2])))
-    for i in range(seg):
-        for j in range(ring):
-            a = verts[i * ring + j]
-            b = verts[((i + 1) % seg) * ring + j]
-            c = verts[((i + 1) % seg) * ring + (j + 1) % ring]
-            d = verts[i * ring + (j + 1) % ring]
-            bm.faces.new((a, b, c, d))
-    bm.to_mesh(me)
-    bm.free()
-    obj = bpy.data.objects.new(name, me)
-    bpy.context.collection.objects.link(obj)
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
-    return obj
-
-
 def with_material(obj, mat):
     obj.data.materials.clear()
     obj.data.materials.append(mat)
@@ -241,227 +102,332 @@ def join(objs, name):
     return objs[0]
 
 
-HEAD = Vector((0, 0, 1.645))
-
-
-def head(skin_mat, dz=0.0):
-    """A plain, slightly long head with a nose and ears, like the reference: no drawn features."""
-    c = HEAD + Vector((0, 0, dz))
-    skull = sphere("head", c, 0.114, scale=(0.88, 0.97, 1.08))
-    # Narrow the lower half into cheeks and a chin, and bring the chin a little forward: one smooth
-    # surface, so there's no seam where a separate jaw would meet the skull.
-    for v in skull.data.vertices:
-        below = max(0.0, (c.z - v.co.z) / 0.12)
-        v.co.x = c.x + (v.co.x - c.x) * (1 - 0.28 * below)
-        v.co.y = c.y + (v.co.y - c.y) * (1 - 0.12 * below) - 0.012 * below
-    parts = [
-        skull,
-        sphere("nose", c + Vector((0, -0.108, -0.014)), 0.021, scale=(0.75, 1.0, 1.35), segments=10, rings=8),
-        sphere("earL", c + Vector((0.1, 0.005, -0.005)), 0.025, scale=(0.45, 0.8, 1.1), segments=10, rings=8),
-        sphere("earR", c + Vector((-0.1, 0.005, -0.005)), 0.025, scale=(0.45, 0.8, 1.1), segments=10, rings=8),
-    ]
-    for o in parts:
-        with_material(o, skin_mat)
-    return parts
-
-
-def hair_cap(name, mat, dz=0.0, back=0.0, cover=-0.02, scale=(0.97, 1.03, 1.0)):
-    """Hair over the crown and down the back of the head."""
-    o = sphere(name, HEAD + Vector((0, 0.008 + back, 0.014 + dz)), 0.118, scale=scale, cut=cover)
-    return with_material(o, mat)
-
-
-def tops(hair_mat, hat_mat, dz=0.0):
-    """Villagers' hair and hats, each its own object so the game can pick one per person."""
-    out = {}
-    out["short"] = hair_cap("short", hair_mat, dz)
-    bun = hair_cap("bun_hair", hair_mat, dz)
-    knot = with_material(sphere("bun_knot", HEAD + Vector((0, 0.08, 0.1 + dz)), 0.05), hair_mat)
-    out["bun"] = join([bun, knot], "bun")
-    long_cap = hair_cap("long_hair", hair_mat, dz)
-    fall = with_material(sphere("long_fall", HEAD + Vector((0, 0.07, -0.07 + dz)), 0.1, scale=(1.0, 0.55, 1.35)), hair_mat)
-    out["long"] = join([long_cap, fall], "long")
-    out["curly"] = with_material(sphere("curly", HEAD + Vector((0, 0.02, 0.04 + dz)), 0.15, scale=(1.0, 0.95, 0.88)), hair_mat)
-    # A beanie with a folded cuff and a pom-pom.
-    beanie = with_material(sphere("beanie_crown", HEAD + Vector((0, 0.005, 0.035 + dz)), 0.124, scale=(0.95, 1.02, 1.05), cut=-0.01), hat_mat)
-    cuff = with_material(torus("beanie_cuff", HEAD + Vector((0, 0.005, 0.035 + dz)), 0.114, 0.02, scale=(0.95, 1.02, 1)), hat_mat)
-    pom = with_material(sphere("beanie_pom", HEAD + Vector((0, 0.005, 0.17 + dz)), 0.034), hat_mat)
-    out["beanie"] = join([beanie, cuff, pom], "beanie")
-    # A wide-brimmed hat with a band, as worn by the man by the truck.
-    crown = with_material(sphere("sunhat_crown", HEAD + Vector((0, 0.005, 0.068 + dz)), 0.112, scale=(1, 1, 0.9), cut=-0.005), hat_mat)
-    brim = with_material(cylinder("sunhat_brim", HEAD + Vector((0, 0.005, 0.066 + dz)), 0.21, 0.012, segments=28), hat_mat)
-    out["sunhat"] = join([crown, brim], "sunhat")
-    # A cap with a peak.
-    cap_crown = with_material(sphere("cap_crown", HEAD + Vector((0, 0.008, 0.035 + dz)), 0.12, scale=(0.97, 1.03, 0.95), cut=-0.005), hat_mat)
-    peak = with_material(cylinder("cap_peak", HEAD + Vector((0, -0.115, 0.04 + dz)), 0.08, 0.01, segments=20, scale=(1, 0.75, 1)), hat_mat)
-    out["cap"] = join([cap_crown, peak], "cap")
-    return out
-
-
 # ---------------------------------------------------------------------------------------------
-# The rider: body, head, helmet with goggles, scarf, mittens and boots, on an armature.
+# The rider: a rigged body dressed for the mountain.
 
-BONES = [
-    # name, head point, tail point, parent
-    ("hips", "pelvis", "waist", None),
-    ("spine", "waist", "chest", "hips"),
-    ("chest", "chest", "neckbase", "spine"),
-    ("neck", "neckbase", "necktop", "chest"),
-    ("head", "necktop", None, "neck"),
-]
-for _s in "LR":
-    BONES += [
-        (f"thigh.{_s}", f"hip{_s}", f"knee{_s}", "hips"),
-        (f"shin.{_s}", f"knee{_s}", f"ankle{_s}", f"thigh.{_s}"),
-        (f"foot.{_s}", f"ankle{_s}", f"toe{_s}", f"shin.{_s}"),
-        (f"upperarm.{_s}", f"shoulder{_s}", f"elbow{_s}", "chest"),
-        (f"forearm.{_s}", f"elbow{_s}", f"wrist{_s}", f"upperarm.{_s}"),
-        (f"hand.{_s}", f"wrist{_s}", f"hand{_s}", f"forearm.{_s}"),
-    ]
+def gear(name, hexcolor, rough=0.8, metal=0.0):
+    """A Principled material with its own roughness (and metalness, for the goggle lens)."""
+    m = material(name, hexcolor)
+    bsdf = m.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Roughness"].default_value = rough
+    bsdf.inputs["Metallic"].default_value = metal
+    return m
 
 
-def segment_distance(p, a, b):
-    ab = b - a
-    t = max(0.0, min(1.0, (p - a).dot(ab) / ab.length_squared))
-    return (p - (a + ab * t)).length
+# Triangle budget per piece of the rider, after decimation.
+RIDER_TRIS = {"jacket": 9000, "pants": 5000, "skin": 2500, "helmet": 1600, "gaiter": 900, "goggleFrame": 600,
+              "lens": 300, "strap": 400, "bootL": 1200, "bootR": 1200, "gloveL": 900, "gloveR": 900}
 
 
 def build_rider():
-    mats = {
-        "jacket": material("jacket", 0xE2725B),
-        "pants": material("pants", 0x3E5C8A),
-        "skin": material("skin", 0xE0A889),
-        "gloves": material("gloves", 0x3B3350),
-        "boots": material("boots", 0x4A4048),
-        "helmet": material("helmet", 0x4F8F7A),
-        "goggles": material("goggles", 0x2E2A36),
-        "lens": material("lens", 0x9FD0D6),
-        "hair": material("hair", 0x6E4430),
-        "scarf": material("scarf", 0xF2B544),
+    """A realistic rider from the CC0 MakeHuman body (see human.py): an athletic young man in a shell jacket
+    with a darker yoke and side panels, ski trousers, boots, gloves, a helmet with goggles and a neck gaiter.
+    Every garment is grown from the body, so it fits, and keeps the body's bone weights."""
+    import human
+
+    body, J = human.build_body("rider", {"caucasian-male-young": 1.0, "universal-male-young-maxmuscle-averageweight": 0.15})
+    rig = human.build_rig(J)
+    human.bind([body], rig)
+    human.repose(rig, [body])
+    B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
+    eyeZ, faceY = J["eyeL"].z, J["eyeL"].y
+    hem = B["hips"][0].z - 0.1
+    boot_top = 0.30
+    neck = B["neck"][0].z
+    M = {
+        "jacket": gear("jacket", 0xE2725B, 0.75), "pants": gear("pants", 0x3B4352, 0.85), "gloves": gear("gloves", 0x2A2B31, 0.6),
+        "boots": gear("boots", 0x3A3C42, 0.7), "helmet": gear("helmet", 0xD9D6CF, 0.35), "goggles": gear("goggles", 0x16171A, 0.5),
+        "lens": gear("lens", 0xC8873A, 0.05, 0.6), "skin": gear("skin", 0xE0A889, 0.55), "gaiter": gear("gaiter", 0x3A3F4A, 0.9),
     }
-    points, radii, edges = skeleton("stand", "rider")
-    body = skin_body("rider", points, radii, edges)
+    ARM = ("upperarm", "forearm")
+    bones = human.dominant_bones(body)
 
-    def region(c):
-        if c.z > 1.47:
-            return "skin"
-        if abs(c.x) > 0.2 and c.z < 0.865:
-            return "gloves"
-        if c.z > 0.9:
-            return "jacket"
-        if c.z > 0.15:
-            return "pants"
-        return "boots"
+    # The helmet's edge: a plane at the brow that drops steeply toward the back, over the ears.
+    edge_at, edge_n = Vector((0, faceY + 0.05, eyeZ + 0.028)), Vector((0, 0.9, 1)).normalized()
+    above_edge = lambda co: (co - edge_at).dot(edge_n)
 
-    assign_regions(body, list(mats.values()), region, cuts=(1.47, 0.9, 0.865, 0.15))
+    def wrist(co):
+        return (co - B[f"hand.{'L' if co.x > 0 else 'R'}"][0]).length
 
-    # Head and gear, all riding on the head bone.
-    extras = head(mats["skin"])
-    extras.append(hair_cap("hair", mats["hair"], back=0.02, cover=-0.06, scale=(1.0, 1.05, 1.0)))
-    extras.append(with_material(sphere("helmet", HEAD + Vector((0, 0.004, 0.024)), 0.132, scale=(0.95, 1.04, 1.0), cut=-0.01), mats["helmet"]))
-    # Goggles pushed up on the helmet's brow: a strap round it and a lens at the front.
-    extras.append(with_material(torus("strap", HEAD + Vector((0, 0.004, 0.058)), 0.129, 0.013, scale=(0.95, 1.04, 1.0)), mats["goggles"]))
-    frame = with_material(sphere("goggle_frame", HEAD + Vector((0, -0.114, 0.07)), 0.055, scale=(1.55, 0.55, 0.75), segments=16, rings=10), mats["goggles"])
-    lens = with_material(sphere("goggle_lens", HEAD + Vector((0, -0.133, 0.07)), 0.047, scale=(1.55, 0.35, 0.62), segments=16, rings=10), mats["lens"])
-    extras += [frame, lens]
-    scarf = with_material(torus("scarf", Vector((0, 0, 1.46)), 0.07, 0.03, scale=(1.05, 1.0, 1.0)), mats["scarf"])
+    def level_hem(bm):
+        # A straight hem round the hips, not one that follows the legs down between them.
+        for v in bm.verts:
+            if abs(v.co.x) < 0.2:
+                v.co.z = max(v.co.z, hem - 0.02)
 
-    arm_data = bpy.data.armatures.new("rig")
-    rig = bpy.data.objects.new("rig", arm_data)
-    bpy.context.collection.objects.link(rig)
-    bpy.context.view_layer.objects.active = rig
+    armpit = lambda c: min((c - (B[f"upperarm.{s}"][0] + Vector((0, 0, -0.12)))).length for s in "LR") < 0.16
+    jacket = human.shell(
+        body, "jacket",
+        lambda i, co, b: (b.startswith(ARM) and wrist(co) > 0.02) or ((b in ("chest", "spine", "hips") or b.startswith("thigh")) and co.z > hem) or (b == "neck" and co.z < neck + 0.03),
+        lambda co, b: 0.028 if b.startswith(ARM) else 0.04, M["jacket"], smooth=40, clear=0.6, relax=(armpit, 40),
+        # Cloth stretched across the chest and back, hanging from the chest over the belly.
+        drape=lambda bm: (level_hem(bm), human.drape_slices(hem - 0.05, neck - 0.02, skip=lambda i: bones[i].startswith(ARM))(bm),
+                          human.drape_front(B["chest"][1].z - 0.02, hem - 0.05, slack=0.015)(bm)))
+    pants = human.shell(
+        body, "pants",
+        lambda i, co, b: ((b == "hips" or b.startswith("thigh")) and co.z < hem + 0.03) or (b.startswith(("shin", "foot")) and co.z > boot_top - 0.12),
+        lambda co, b: 0.026 + (0.02 if co.z < boot_top + 0.05 else 0.0), M["pants"], smooth=8)
+    parts = [jacket, pants]
+    for side in "LR":
+        parts.append(human.hull_shell(body, f"boot{side}", lambda i, co, b, side=side: b == f"foot.{side}" or (b == f"shin.{side}" and co.z < boot_top),
+                                      0.012, M["boots"], keep=lambda n, c: n.z > -0.7, rim=0.006))
+        # Gloves with a gauntlet cuff that comes over the sleeve.
+        parts.append(human.shell(body, f"glove{side}", lambda i, co, b, side=side: b == f"hand.{side}" or (b == f"forearm.{side}" and (co - B[f"hand.{side}"][0]).length < 0.09),
+                                 lambda co, b: 0.012 if b.startswith("hand") else 0.04, M["gloves"], smooth=4, clear=0.0, iron=False))
+    parts.append(human.hull_shell(body, "helmet", lambda i, co, b: b == "head" and above_edge(co) > -0.03, 0.02, M["helmet"], bone="head", rim=0.012,
+                                  cuts=[(edge_at, edge_n)]))
+    band = lambda i, co, b: b == "head" and abs(co.z - eyeZ) < 0.034 and co.y < faceY + 0.04
+    gz = eyeZ + 0.01
+    up, down = Vector((0, 0, 1)), Vector((0, 0, -1))
+    parts.append(human.hull_shell(body, "goggleFrame", band, 0.02, M["goggles"], bone="head", rim=0.012,
+                                  cuts=[(Vector((0, faceY + 0.035, 0)), Vector((0, -1, 0))), (Vector((0, 0, gz + 0.03)), down), (Vector((0, 0, gz - 0.03)), up)]))
+    parts.append(human.hull_shell(body, "lens", band, 0.026, M["lens"], bone="head", rim=0.004, scale=(0.95, 1, 1),
+                                  cuts=[(Vector((0, faceY + 0.005, 0)), Vector((0, -1, 0))), (Vector((0, 0, gz + 0.024)), down), (Vector((0, 0, gz - 0.024)), up)]))
+    parts.append(human.hull_shell(body, "strap", lambda i, co, b: b == "head" and abs(co.z - gz) < 0.04, 0.024, M["goggles"], bone="head", rim=0.005,
+                                  cuts=[(Vector((0, faceY + 0.03, 0)), Vector((0, 1, 0))), (Vector((0, 0, gz + 0.016)), down), (Vector((0, 0, gz - 0.016)), up)]))
+    parts.append(human.hull_shell(body, "gaiter", lambda i, co, b: (b == "neck" and co.z > neck - 0.02) or (b == "head" and co.z < eyeZ - 0.02), 0.012, M["gaiter"], rim=0.008,
+                                  cuts=[(Vector((0, 0, eyeZ - 0.03)), Vector((0, 0.3, -1)).normalized()), (Vector((0, 0, neck - 0.01)), up)]))
+
+    # Two-tone jacket: a dark shoulder yoke, cuffs and hem band and a zip down the front, like a technical shell.
+    def ss(a, b, x):
+        t = max(0.0, min(1.0, (x - a) / (b - a)))
+        return t * t * (3 - 2 * t)
+
+    chest_top, chest_base = B["chest"][1].z, B["chest"][0].z
+
+    def shade(c):
+        yoke = ss(chest_top - 0.09, chest_top - 0.05, c.z) * ss(0.05, 0.08, abs(c.x))
+        cuff = 1 - ss(0.07, 0.085, min((c - B[f"hand.{s}"][0]).length for s in "LR"))
+        band = (1 - ss(hem + 0.035, hem + 0.05, c.z)) * (1 - ss(0.19, 0.21, abs(c.x)))
+        zip_ = (1 - ss(0.004, 0.008, abs(c.x))) * (1 if c.y < 0 else 0)
+        return 1.0 - 0.94 * max(yoke, cuff, band, zip_)
+
+    human.paint(jacket, shade)
+    # Only the face shows: the rest of the body is under the clothes.
+    human.trim_body(body, lambda i, co, b: b == "head" and not (above_edge(co) > -0.012))
+    body.data.materials.clear()
+    body.data.materials.append(M["skin"])
+    body.name = body.data.name = "skin"
+    parts.append(body)
+    human.bind([p for p in parts if p is not body], rig)
+    for o in parts:
+        decimate(o, RIDER_TRIS.get(o.name))
+    return rig, parts
+
+
+def decimate(obj, tris):
+    """Collapses `obj` down to about `tris` triangles (weights and vertex colours carry over)."""
+    have = sum(len(p.vertices) - 2 for p in obj.data.polygons)
+    if not tris or have <= tris:
+        return
+    bpy.context.view_layer.objects.active = obj
     for o in bpy.context.view_layer.objects:
-        o.select_set(o == rig)
-    bpy.ops.object.mode_set(mode="EDIT")
-    segs = {}
-    for name, h, t, parent in BONES:
-        b = arm_data.edit_bones.new(name)
-        b.head = points[h]
-        b.tail = points[t] if t else points[h] + Vector((0, 0, 0.2))
-        if name.startswith("hand."):
-            b.tail = points[t] + (points[t] - points[h]).normalized() * 0.05
-        if parent:
-            b.parent = arm_data.edit_bones[parent]
-        segs[name] = (b.head.copy(), b.tail.copy())
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    # Weights: each vertex follows its two nearest bones, blended by distance, so joints bend softly.
-    def weigh(obj, only=None):
-        groups = {name: obj.vertex_groups.new(name=name) for name, *_ in BONES}
-        for v in obj.data.vertices:
-            p = obj.matrix_world @ v.co
-            if only:
-                groups[only].add([v.index], 1.0, "REPLACE")
-                continue
-            d = sorted((segment_distance(p, *segs[n]), n) for n in segs)
-            (d0, n0), (d1, n1) = d[0], d[1]
-            w0, w1 = 1 / (d0 + 1e-3) ** 4, 1 / (d1 + 1e-3) ** 4
-            groups[n0].add([v.index], w0 / (w0 + w1), "REPLACE")
-            groups[n1].add([v.index], w1 / (w0 + w1), "REPLACE")
-
-    weigh(body)
-    for o in extras:
-        weigh(o, "head")
-    weigh(scarf, "neck")
-    rider = join([body, *extras, scarf], "rider")
-    rider.parent = rig
-    mod = rider.modifiers.new("rig", "ARMATURE")
-    mod.object = rig
-    return rig, rider
+        o.select_set(o == obj)
+    m = obj.modifiers.new("lod", "DECIMATE")
+    m.ratio = tris / have
+    bpy.ops.object.modifier_move_to_index(modifier="lod", index=0)
+    bpy.ops.object.modifier_apply(modifier="lod")
 
 
 # ---------------------------------------------------------------------------------------------
 # Villagers: posed bodies (no rig; they only sway and hop), plus the hair and hat pieces.
 
 
+VILLAGER_BUILDS = {
+    # name: MakeHuman targets. Both are scaled to one height so the hair and hats fit either head.
+    "m": {"caucasian-male-young": 0.6, "asian-male-young": 0.4, "universal-male-young-averagemuscle-maxweight": 0.25},
+    "f": {"caucasian-female-young": 0.6, "african-female-young": 0.4, "universal-female-young-averagemuscle-maxweight": 0.15},
+}
+SIT_DROP = 0.45  # seated bodies sit this much lower (crowd.ts drops their hair and hats to match)
+VILLAGER_TRIS = {"shirt": 1800, "forearm": 400, "pants": 1300, "shoes": 400, "skin": 1600, "eyes": 120}
+
+
+def villager_aims(pose):
+    """Extra bone aims (armature space: z up, facing -y) for a pose, on top of standing with arms down."""
+    aims = {}
+    for s, sign in (("L", 1), ("R", -1)):
+        if pose.startswith("sit"):
+            aims[f"thigh.{s}"] = Vector((sign * 0.08, -1, -0.04))
+            aims[f"shin.{s}"] = Vector((sign * 0.03, -0.12, -1))
+            # Hands resting on the lap.
+            aims[f"upperarm.{s}"] = Vector((sign * 0.12, -0.4, -1))
+            aims[f"forearm.{s}"] = Vector((-sign * 0.15, -1, -0.3))
+            aims[f"hand.{s}"] = Vector((-sign * 0.2, -1, -0.4))
+        if pose.endswith("cheer"):
+            aims[f"upperarm.{s}"] = Vector((sign * 0.6, -0.1, 1))
+            aims[f"forearm.{s}"] = Vector((sign * 0.25, -0.15, 1))
+            aims[f"hand.{s}"] = Vector((sign * 0.15, -0.1, 1))
+    return aims
+
+
+def villager_body(build, pose, height):
+    """One villager body in one pose, dressed: a jumper (its forearms their own piece, for short sleeves),
+    trousers, shoes, and the skin that shows. Returns the parts, the joints and the eyes' height."""
+    import human
+
+    body, J = human.build_body(f"{build}_{pose}", VILLAGER_BUILDS[build])
+    # One height for everyone, measured to the crown, so the tops fit.
+    k = height / J["crown"].z
+    for v in body.data.vertices:
+        v.co *= k
+    J = {n: c * k for n, c in J.items()}
+    rig = human.build_rig(J)
+    human.bind([body], rig)
+    human.repose(rig, [body], poses=villager_aims(pose))
+    B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
+    bones = human.dominant_bones(body)
+    ARM = ("upperarm", "forearm")
+    waist = B["hips"][0].z + 0.07  # the belt line, a little above the hip joints
+    neck = B["neck"][0].z
+    M = {n: bpy.data.materials.get(n) for n in ("shirt", "forearm", "pants", "skin", "shoes", "eyes")}
+
+    def wrist(co):
+        return min((co - B[f"hand.{s}"][0]).length for s in "LR")
+
+    def elbow(co):
+        return min((co - B[f"forearm.{s}"][0]).length for s in "LR")
+
+    # The jumper reaches the top of the thighs all round, over the trousers' waist; sleeves to just past the elbow.
+    upper = lambda b, co: b in ("chest", "spine") or (b == "hips" and co.z > waist - 0.06) or (b.startswith("thigh") and co.z > waist - 0.06 and not pose.startswith("sit")) or (b == "neck" and co.z < neck + 0.02) or b.startswith("upperarm") or (b.startswith("forearm") and elbow(co) < 0.06)
+    shirt = human.shell(body, "shirt", lambda i, co, b: upper(b, co), lambda co, b: 0.016 + 0.012 * (1 - min(1, max(0, (co.z - waist) / 0.08))), M["shirt"], smooth=20, clear=0.6,
+                        drape=human.drape_slices(waist - 0.1, neck - 0.03, skip=lambda i: bones[i].startswith(ARM)) if pose == "stand" or pose == "cheer" else None)
+    forearm = human.shell(body, "forearm", lambda i, co, b: b.startswith("forearm") and wrist(co) > 0.015 and elbow(co) > 0.03, lambda co, b: 0.008, M["forearm"], smooth=6, clear=0.5)
+    pants = human.shell(body, "pants", lambda i, co, b: (b in ("hips", "spine") or b.startswith("thigh")) and co.z < waist + 0.02 or b.startswith("shin"),
+                        lambda co, b: 0.014, M["pants"], smooth=12, clear=0.6)
+    shoes = [human.hull_shell(body, f"shoe{s}", lambda i, co, b, s=s: b == f"foot.{s}" or (b == f"shin.{s}" and co.z < B[f"foot.{s}"][0].z + 0.03), 0.01, M["shoes"],
+                              keep=lambda n, c: n.z > -0.8, rim=0.005) for s in "LR"]
+    shoe = join(shoes, "shoes")
+    eye_dots = []
+    for s in "LR":
+        from mathutils.bvhtree import BVHTree
+
+        tree = BVHTree.FromObject(body, bpy.context.evaluated_depsgraph_get())
+        c = J[f"eye{s}"]
+        hit = tree.ray_cast(c + Vector((0, -0.2, 0)), Vector((0, 1, 0)))[0]  # the lid's surface in front of the eyeball
+        if hit:
+            eye_dots.append(with_material(sphere(f"eye{s}", hit + Vector((0, 0.001, 0)), 0.011, scale=(1.0, 0.35, 0.55), segments=10, rings=6), M["eyes"]))
+    human.trim_body(body, lambda i, co, b: b in ("head", "neck") and not (b == "neck" and co.z < neck + 0.01) or b.startswith("hand"))
+    body.data.materials.clear()
+    body.data.materials.append(M["skin"])
+    body.data.materials.append(M["eyes"])
+    body.name = body.data.name = "skin"
+    body = join([body, *eye_dots], "skin")
+    parts = [shirt, forearm, pants, shoe, body]
+    # Flatten onto the posed rest shape: no rig in the villager file, they only sway and hop.
+    for o in parts:
+        o.modifiers.clear()
+        o.parent = None
+        o.vertex_groups.clear()
+        decimate(o, VILLAGER_TRIS.get(o.name) if o is not body else VILLAGER_TRIS["skin"] + VILLAGER_TRIS["eyes"])
+        if pose.startswith("sit"):
+            for v in o.data.vertices:
+                v.co.z -= SIT_DROP
+    bpy.data.objects.remove(rig)
+    return parts, J
+
+
+def villager_tops(J, faceY, mats):
+    """Hair and hats, fitted round the standing villager head (`J` its joints): convex hulls of the scalp
+    above a hairline, each one object of one material so the game can draw each style instanced."""
+    import human
+
+    eyeZ = J["eyeL"].z
+    body, _ = human.build_body("tops_head", VILLAGER_BUILDS["m"])
+    k = J["crown"].z / _["crown"].z
+    for v in body.data.vertices:
+        v.co *= k
+    head = [v.co.copy() for v in body.data.vertices if v.co.z > J["necktop"].z - 0.02]
+    bpy.data.objects.remove(body)
+    hair, hat = mats["hair"], mats["hat"]
+
+    def hull(name, pts, offset, mat, cuts, subdiv=2):
+        me = bpy.data.meshes.new(name)
+        bm = bmesh.new()
+        for p in pts:
+            bm.verts.new(p)
+        res = bmesh.ops.convex_hull(bm, input=bm.verts[:])
+        loose = {g for g in res["geom_interior"] + res["geom_unused"] if isinstance(g, bmesh.types.BMVert)}
+        bmesh.ops.delete(bm, geom=list(loose), context="VERTS")
+        bm.normal_update()
+        for v in bm.verts:
+            v.co += v.normal * offset
+        for co, no in cuts:
+            bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=co, plane_no=no, clear_inner=True)
+        bmesh.ops.triangulate(bm, faces=bm.faces[:])
+        bmesh.ops.beautify_fill(bm, faces=bm.faces[:], edges=bm.edges[:])
+        bm.to_mesh(me)
+        bm.free()
+        o = bpy.data.objects.new(name, me)
+        bpy.context.collection.objects.link(o)
+        with_material(o, mat)
+        bpy.context.view_layer.objects.active = o
+        for x in bpy.context.view_layer.objects:
+            x.select_set(x == o)
+        if subdiv:
+            m = o.modifiers.new("round", "SUBSURF")
+            m.levels = subdiv
+            bpy.ops.object.modifier_apply(modifier="round")
+        m = o.modifiers.new("rim", "SOLIDIFY")
+        m.thickness = 0.008
+        m.offset = -1
+        bpy.ops.object.modifier_apply(modifier="rim")
+        for p in o.data.polygons:
+            p.use_smooth = True
+        return o
+
+    def line(front_z, slope):
+        """A hairline or hat edge: at `front_z` over the brow, dropping by `slope` per metre toward the back."""
+        return (Vector((0, faceY, front_z)), Vector((0, slope, 1)).normalized())
+
+    def above(pts, cut):
+        co, no = cut
+        return [p for p in pts if (p - co).dot(no) > -0.03]
+
+    crown = J["crown"]
+    out = {}
+    hairline = line(eyeZ + 0.06, 1.1)
+    out["short"] = hull("short", above(head, hairline), 0.012, hair, [hairline])
+    bun = hull("bun_hair", above(head, hairline), 0.01, hair, [hairline])
+    knot = with_material(sphere("bun_knot", Vector((0, crown.y + 0.09, crown.z - 0.05)), 0.045), hair)
+    out["bun"] = join([bun, knot], "bun")
+    # Long hair: the scalp plus the back of the head carried down to the shoulders.
+    falls = line(eyeZ + 0.06, 2.2)
+    back = [p for p in head if p.y > faceY + 0.1]
+    long_pts = above(head, falls) + [p + Vector((0, 0.015, -0.17)) for p in back if p.z > eyeZ - 0.03]
+    out["long"] = hull("long", long_pts, 0.014, hair, [falls, (Vector((0, faceY + 0.07, eyeZ)), Vector((0, 1, 0.6)).normalized())])
+    out["curly"] = hull("curly", above(head, line(eyeZ + 0.05, 1.3)), 0.035, hair, [line(eyeZ + 0.05, 1.3)])
+    brow = line(eyeZ + 0.055, 0.45)
+    beanie = hull("beanie_crown", above(head, brow), 0.02, hat, [brow])
+    pom = with_material(sphere("beanie_pom", Vector((0, crown.y + 0.01, crown.z + 0.05)), 0.035), hat)
+    out["beanie"] = join([beanie, pom], "beanie")
+    band = line(eyeZ + 0.07, 0.25)
+    crown_piece = hull("sunhat_crown", above(head, band), 0.016, hat, [band])
+    brim = with_material(cylinder("sunhat_brim", Vector((0, crown.y + 0.01, eyeZ + 0.075)), 0.2, 0.01, segments=32), hat)
+    out["sunhat"] = join([crown_piece, brim], "sunhat")
+    capline = line(eyeZ + 0.06, 0.3)
+    cap = hull("cap_crown", above(head, capline), 0.013, hat, [capline])
+    peak = with_material(cylinder("cap_peak", Vector((0, faceY - 0.06, eyeZ + 0.065)), 0.08, 0.008, segments=20, scale=(1, 0.75, 1)), hat)
+    out["cap"] = join([cap, peak], "cap")
+    for o in out.values():
+        decimate(o, 700)
+    return list(out.values())
+
+
 def build_villagers():
-    mats = {
-        "shirt": material("shirt", 0xE2725B),
-        "pants": material("pants", 0x3E5C8A),
-        "skin": material("skin", 0xC98E6A),
-        "shoes": material("shoes", 0x3B3350),
-        "forearm": material("forearm", 0xE2725B),
-    }
+    for name, hexcolor in (("shirt", 0xE2725B), ("forearm", 0xE2725B), ("pants", 0x3E5C8A), ("skin", 0xC98E6A), ("shoes", 0x3B3350),
+                           ("eyes", 0x2A2420), ("hair", 0x3A2A24), ("hat", 0xF4D6A0)):
+        material(name, hexcolor)
+    height = 1.74
     objs = []
-    for pose in ("stand", "sit", "cheer", "sitcheer"):
-        points, radii, edges = skeleton(pose, "villager")
-        body = skin_body(f"body_{pose}", points, radii, edges)
-        sit = pose.startswith("sit")
-
-        def region(c, sit=sit, pose=pose):
-            lift = -0.45 if sit else 0.0
-            cheer = pose in ("cheer", "sitcheer")
-            if c.z > 1.47 + lift:
-                return "skin"
-            if abs(c.x) > 0.21:
-                # Arms: hands are skin; the forearm is its own colour, so a villager can wear short
-                # sleeves (skin) or long ones (shirt).
-                if cheer:
-                    if c.z > 1.86 + lift:
-                        return "skin"
-                    if c.z > 1.62 + lift:
-                        return "forearm"
-                else:
-                    if c.z < 0.86 + lift:
-                        return "skin"
-                    if c.z < 1.14 + lift:
-                        return "forearm"
-                return "shirt"
-            # The shirt ends in a level hem at the hips; a seated lap is trousers.
-            if c.z > 0.94 + lift and not (sit and c.y < -0.1):
-                return "shirt"
-            if c.z > 0.13:
-                return "pants"
-            return "shoes"
-
-        lift = -0.45 if sit else 0.0
-        arm_cuts = (1.86, 1.62) if pose in ("cheer", "sitcheer") else (1.14, 0.86)
-        assign_regions(body, list(mats.values()), region, cuts=[z + lift for z in (1.47, 0.94, *arm_cuts)] + [0.13])
-        parts = head(mats["skin"], dz=-0.45 if sit else 0.0)
-        objs.append(join([body, *parts], f"body_{pose}"))
-    hair = material("hair", 0x3A2A24)
-    hat = material("hat", 0xF4D6A0)
-    objs += list(tops(hair, hat).values())
+    stand_joints = None
+    for build in VILLAGER_BUILDS:
+        for pose in ("stand", "sit", "cheer", "sitcheer"):
+            parts, J = villager_body(build, pose, height)
+            if build == "m" and pose == "stand":
+                stand_joints = J
+            objs.append(join(parts, f"body_{build}_{pose}"))
+    mats = {n: bpy.data.materials[n] for n in ("hair", "hat")}
+    objs += villager_tops(stand_joints, stand_joints["eyeL"].y, mats)
     return objs
 
 
@@ -478,6 +444,8 @@ def export(path, objects):
         export_animations=False,
         export_materials="EXPORT",
         export_texcoords=False,
+        export_vertex_color="NAME",
+        export_vertex_color_name="Col",
         export_yup=True,
     )
 
@@ -485,8 +453,8 @@ def export(path, objects):
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     os.makedirs(OUT, exist_ok=True)
-    rig, rider = build_rider()
-    export(os.path.join(OUT, "rider.glb"), [rig, rider])
+    rig, parts = build_rider()
+    export(os.path.join(OUT, "rider.glb"), [rig, *parts])
     for o in list(bpy.data.objects):
         bpy.data.objects.remove(o)
     export(os.path.join(OUT, "villager.glb"), build_villagers())
