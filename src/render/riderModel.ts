@@ -5,6 +5,7 @@ import { heightAt, normalAt } from '../sim/terrain';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { PALETTE } from './toon';
 import { painted, riderAsset } from './characterAssets';
+import { ski, snowboard } from './gear';
 
 /** What the renderer needs to pose the rider for one frame. */
 export interface RiderPose {
@@ -84,16 +85,11 @@ const groundQ = new THREE.Quaternion();
 const follow = (current: number, target: number, rate: number, dt: number): number =>
   current + (target - current) * (1 - Math.exp(-rate * dt));
 
-const part = (geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh => {
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  return m;
-};
-const box = (w: number, h: number, d: number, color: number): THREE.Mesh => part(new THREE.BoxGeometry(w, h, d), painted(color));
-
 /** How far the arms hang out from the body in the model's rest pose (rad); arm angles are measured from straight down. */
 const REST_ARM_OUT = 0.15;
+/** Top sheet colours of the board and the skis. */
+const BOARD_TOP = 0x2e7d8c;
+const SKI_TOP = 0x2b3a55;
 /** Leg length hip to ankle (m), and how much a full crouch lowers the hips. */
 const LEG = { length: 0.83, drop: 0.36 };
 
@@ -140,13 +136,13 @@ export class RiderModel {
   private readonly joints = new Map<string, Joint>();
   private readonly hipsRest: THREE.Vector3;
   private readonly j: Joints = { legX: [0, 0], legZ: [0, 0], armX: [0, 0], armOut: [0.35, 0.35], elbow: 0.3, torsoYaw: 0, crouch: 0.15 };
-  private readonly board = box(0.3, 0.05, 1.55, PALETTE.plum);
+  private readonly board = snowboard(BOARD_TOP);
   private readonly skis = new THREE.Group();
   /** Ski poles, one in each hand (right, left). */
   private readonly poles: THREE.Mesh[] = [];
   /** Gear over the shoulder while walking. */
   private readonly carried = new THREE.Group();
-  private readonly carriedBoard = box(0.3, 1.55, 0.05, PALETTE.plum);
+  private readonly carriedBoard = snowboard(BOARD_TOP);
   private readonly carriedSkis = new THREE.Group();
   private readonly jacketMat: THREE.MeshLambertMaterial;
   private walking = false;
@@ -182,7 +178,12 @@ export class RiderModel {
       if (o instanceof THREE.Mesh) {
         o.castShadow = true;
         o.frustumCulled = false; // the posed body leaves its rest bounds
-        if ((o.material as THREE.Material).name === 'jacket') o.material = jacket ??= (o.material as THREE.MeshLambertMaterial).clone();
+        const mat = o.material as THREE.MeshLambertMaterial;
+        if (mat.name === 'jacket') {
+          // A fresh painted material (a clone would lose the painted shader's fill).
+          jacket ??= Object.assign(painted(mat.color.clone()), { name: 'jacket' });
+          o.material = jacket;
+        }
       }
       if (o instanceof THREE.Bone) {
         const frame = new THREE.Quaternion();
@@ -203,23 +204,23 @@ export class RiderModel {
       this.poles.push(pole);
     }
 
-    this.board.position.y = 0.03;
+    this.board.position.y = 0.025;
     for (const side of [-1, 1]) {
-      const ski = box(0.1, 0.04, 1.75, PALETTE.plum);
-      ski.position.set(side * 0.12, 0.02, 0.1);
-      this.skis.add(ski);
+      const s = ski(SKI_TOP);
+      s.position.set(side * 0.12, 0.012, 0.1);
+      this.skis.add(s);
     }
     this.lean.add(this.board, this.skis);
 
     // Board slung on the back; skis together over the right shoulder. Laid out in model space, then
     // hung on the chest bone so they move with the body.
-    this.carriedBoard.position.set(0, 0.3, -0.2);
-    this.carriedBoard.rotation.z = 0.5;
+    this.carriedBoard.position.set(0, 0.3, -0.24);
+    this.carriedBoard.rotation.set(-Math.PI / 2, 0, 0.5, 'ZXY'); // standing on its tail, top sheet out
     for (const side of [-1, 1]) {
-      const ski = box(0.08, 0.04, 1.75, PALETTE.plum);
-      ski.position.set(-0.24 + side * 0.05, 0.5, 0.04);
-      ski.rotation.x = -0.35;
-      this.carriedSkis.add(ski);
+      const s = ski(SKI_TOP);
+      s.position.set(-0.26 + side * 0.05, 0.5, 0.04);
+      s.rotation.set(-0.35, 0, Math.PI / 2); // base to base, on edge
+      this.carriedSkis.add(s);
     }
     this.carried.add(this.carriedBoard, this.carriedSkis);
     this.carried.visible = false;

@@ -21,18 +21,15 @@ export function painted(color: THREE.ColorRepresentation, fill = 0.18): THREE.Me
   return m;
 }
 
-/** Swaps each glTF material for a painted one of the same name and colour. */
-function repaint(root: THREE.Object3D): void {
-  const made = new Map<string, THREE.MeshLambertMaterial>();
+/** The rider's glTF materials become painted ones of the same colour and name (the skin's nose is redder in
+ * its vertex colours), and every piece casts a shadow. */
+function prepare(root: THREE.Object3D): void {
   root.traverse((o) => {
     if (!(o instanceof THREE.Mesh)) return;
     const src = o.material as THREE.MeshStandardMaterial;
-    let m = made.get(src.name);
-    if (!m) {
-      m = painted(src.color);
-      m.name = src.name;
-      made.set(src.name, m);
-    }
+    const m = painted(src.color.clone());
+    m.name = src.name;
+    m.vertexColors = !!o.geometry.getAttribute('color');
     o.material = m;
     o.castShadow = true;
   });
@@ -41,7 +38,7 @@ function repaint(root: THREE.Object3D): void {
 export async function loadCharacters(): Promise<void> {
   const loader = new GLTFLoader();
   [rider, villager] = await Promise.all([loader.loadAsync(riderUrl), loader.loadAsync(villagerUrl)]);
-  repaint(rider.scene);
+  prepare(rider.scene);
 }
 
 export function riderAsset(): GLTF {
@@ -54,7 +51,7 @@ export function villagerAsset(): GLTF {
   return villager;
 }
 
-/** The geometry of each material in a villager piece (body_stand, beanie, ...), in its own frame. */
+/** The geometry of each material in a villager piece (body_m_stand, beanie, ...), in its own frame. */
 export function villagerPart(name: string): Map<string, THREE.BufferGeometry> {
   const node = villagerAsset().scene.getObjectByName(name);
   if (!node) throw new Error(`no villager part ${name}`);

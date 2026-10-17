@@ -5,6 +5,7 @@ import { villagerLook, villagerMeshes } from './render/crowd';
 import { loadCharacters } from './render/characterAssets';
 import { PALETTE } from './render/toon';
 import { golden } from './render/presets/golden';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 // A dev-only character sheet (npm run dev, then /characters.html): everyone front-on in golden-hour
 // light on a patch of snow, for judging the character style without a chase camera in the way.
@@ -18,9 +19,14 @@ renderer.toneMappingExposure = golden.exposure;
 renderer.shadowMap.enabled = true;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(golden.skyHorizon);
+// Some soft light from all round, as the sky gives in the game, so the physically based gear reads.
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.35;
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-camera.position.set(0, 1.6, 9.5);
-camera.lookAt(0, 0.85, 0);
+// ?cam=x,y,z,tx,ty,tz frames a close-up.
+const cam = new URLSearchParams(location.search).get('cam')?.split(',').map(Number);
+camera.position.set(...((cam?.slice(0, 3) ?? [0, 1.6, 9.5]) as [number, number, number]));
+camera.lookAt(...((cam?.slice(3, 6) ?? [0, 0.85, 0]) as [number, number, number]));
 
 const sun = new THREE.DirectionalLight(golden.sunColor, golden.sunIntensity);
 sun.position.set(-4, 5, 6);
@@ -49,7 +55,7 @@ add(0, 'board', 0, PALETTE.mustard);
 
 // Villagers from the same Blender pieces the instanced crowd uses, one of each hair and hat.
 [0, 1, 2, 3, 4, 5, 6].forEach((i, k) => {
-  const v = villagerMeshes(villagerLook(i), i === 5 ? 'sit' : 'stand');
+  const v = villagerMeshes(villagerLook(i), i === 5 ? 'sit' : i === 2 ? 'cheer' : 'stand');
   v.position.x = 0.8 + k * 0.62;
   scene.add(v);
 });

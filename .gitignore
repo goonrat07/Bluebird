@@ -4,3 +4,4 @@ test-results/
 playwright-report/
 test/artifacts/
 *.log
+__pycache__/
