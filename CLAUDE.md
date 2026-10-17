@@ -36,8 +36,9 @@ The full design plan lives in the project's "Bluebird: Full Design & Build Plan"
   (rigged; `riderModel.ts` poses it bone by bone) and `villager.glb` (two builds of body in four poses, plus hair, hats,
   beards, glasses and bags, instanced by `crowd.ts`). Bodies come from MakeHuman's CC0 base mesh (`tools/blender/human.py`,
   assets in `tools/blender/makehuman`) for their proportions, melted into smooth simple forms (`human.simplify`); clothes are
-  grown from that body so they fit. Rebuild with Blender's Python module (`pip install bpy`, then
-  `python tools/blender/characters.py`). The look follows the Tiny Bookshop references in the project files: real proportions,
+  grown from a softened copy of that body in its A pose (thin, close-fitting, straight hems), posed with it, then smoothed
+  again (`human.refine`) so they fit without showing its anatomy; mittens and the villagers' boots are simple egg shapes.
+  Rebuild with Blender's Python module (`pip install bpy`, then `python tools/blender/characters.py`). The look follows the Tiny Bookshop references in the project files: real proportions,
   an egg for a head with an egg nose and two brows (no eyes, mouth or ears), mitten hands, one flat colour per garment,
   softly painted (`painted()` in `characterAssets.ts`). The board and skis are
   `src/render/gear.ts`. With `npm run dev`, `/characters.html` shows everyone side by side (`?cam=x,y,z,tx,ty,tz` for a close-up).

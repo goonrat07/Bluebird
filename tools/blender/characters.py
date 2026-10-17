@@ -320,71 +320,84 @@ def mittens(B, mat):
     return out
 
 
+def to_hips(obj, share):
+    """Moves `share(co)` (0 to 1) of each vertex's thigh weight onto the hips."""
+    hips = obj.vertex_groups["hips"]
+    for s in "LR":
+        g = obj.vertex_groups[f"thigh.{s}"]
+        for v in obj.data.vertices:
+            w = next((e.weight for e in v.groups if e.group == g.index), 0.0)
+            k = share(v.co)
+            if w and k:
+                hips.add([v.index], w * k, "ADD")
+                if k >= 1:
+                    g.remove([v.index])
+                else:
+                    g.add([v.index], w * (1 - k), "REPLACE")
+
+
+def shoulders(B, reach=0.12):
+    """Near either shoulder joint: where bringing the arms down raises a corner in the cloth."""
+    return lambda co: min((co - B[f"upperarm.{s}"][0]).length for s in "LR") < reach
+
+
+def boots(B, mat, width):
+    """Short winter boots: a rounded foot (an egg from heel to toe, its sole on the ground) under a round shaft
+    about the ankle, open at the top where the trousers go in."""
+    out = []
+    for s in "LR":
+        ankle, toe = B[f"foot.{s}"]
+        up = (B[f"shin.{s}"][0] - ankle).normalized()
+        fwd = Vector((toe.x - ankle.x, toe.y - ankle.y, 0)).normalized()
+        sole = ankle.z - 0.072
+        heel, tip = ankle - fwd * 0.055, toe + fwd * 0.02
+        heel.z = tip.z = sole
+        length = (tip - heel).length
+        foot = Egg((heel + tip) / 2 + Vector((0, 0, 0.042)), (width, 0.045, length / 2), rot=Matrix((Vector((0, 0, 1)).cross(fwd), Vector((0, 0, 1)), fwd)).transposed())
+        top = ankle + up * 0.07
+        ring = frame(up)
+        shaft = [c + ring @ Vector((math.cos(a), math.sin(a), 0)) * (width + 0.006) for c in (ankle, top + up * 0.02) for a in [k * math.tau / 24 for k in range(24)]]
+        out.append(hull(f"shoe{s}", foot.points() + shaft, mat, cuts=[plane(top, -up)], rim=0.005))
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 # The rider: a rigged body dressed for the mountain.
 
 # Triangle budget per piece of the rider, after decimation.
-RIDER_TRIS = {"jacket": 6000, "pants": 3500, "skin": 1600, "hair": 900, "helmet": 1400, "strap": 400, "goggleFrame": 500,
+RIDER_TRIS = {"jacket": 8000, "pants": 4500, "skin": 1600, "hair": 900, "helmet": 1400, "strap": 400, "goggleFrame": 500,
               "lens": 300, "bootL": 900, "bootR": 900, "mittenL": 500, "mittenR": 500}
 
 
 def build_rider():
-    """A young man in a puffy jacket, ski trousers, boots, mittens and a rounded helmet with his goggles
-    pushed up onto it. Clothes are grown from the smoothed body, so they fit it and keep its bone weights."""
-    body, J = human.build_body("rider", {"caucasian-male-young": 1.0, "universal-male-young-maxmuscle-averageweight": 0.1})
+    """A young man in a padded jacket, ski trousers, boots, mittens and a rounded helmet with his goggles
+    pushed up onto it. Clothes are grown from a softened copy of the body, so they fit it, keep its bone
+    weights and skim over its anatomy."""
+    body, J = human.build_body("rider", {"caucasian-male-young": 1.0})
     rig = human.build_rig(J)
     human.bind([body], rig)
     human.simplify(body)  # in MakeHuman's A pose, before the arms come down: hands melted onto the hips would tear
-    human.repose(rig, [body])
-    B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
-    head = head_egg(J)
-    hem = B["hips"][0].z - 0.06
-    boot_top = 0.29
-    neck = B["neck"][0].z
     M = {
         "jacket": material("jacket", 0xE2725B), "pants": material("pants", 0x46506A), "mittens": material("mittens", 0x4A4F5C),
         "boots": material("boots", 0x5A5560), "helmet": material("helmet", 0xEDE6D8, 0.5), "goggles": material("goggles", 0x3E4658),
         "lens": material("lens", 0xE39A45, 0.2), "skin": material("skin", 0xE0A889), "brows": material("brows", 0x4A3428),
         "hair": material("hair", 0x4A3428),
     }
-    ARM = ("upperarm", "forearm")
-    bones = human.dominant_bones(body)
-
-    def wrist(co):
-        return (co - B[f"hand.{'L' if co.x > 0 else 'R'}"][0]).length
-
-    def level_hem(bm):
-        # A straight hem round the hips, not one that follows the legs down between them.
-        for v in bm.verts:
-            if abs(v.co.x) < 0.2:
-                v.co.z = max(v.co.z, hem - 0.02)
-
-    armpit = lambda c: min((c - (B[f"upperarm.{s}"][0] + Vector((0, 0, -0.12)))).length for s in "LR") < 0.16
-    jacket = human.shell(
-        body, "jacket",
-        lambda i, co, b: b.startswith(ARM) or ((b in ("chest", "spine", "hips") or b.startswith("thigh")) and co.z > hem) or (b == "neck" and co.z < neck + 0.045),
-        lambda co, b: 0.028 if b.startswith(ARM) else 0.01 if co.z > neck else 0.034, M["jacket"], smooth=40, clear=0.6, relax=(armpit, 40), hem=(hem + 0.1, hem - 0.01),
-        # Cloth stretched across the chest and back.
-        drape=lambda bm: (level_hem(bm), human.drape_slices(hem - 0.05, neck - 0.02, skip=lambda i: bones[i].startswith(ARM))(bm)))
-    pants = human.shell(
-        body, "pants",
-        lambda i, co, b: ((b == "hips" or b.startswith("thigh")) and co.z < hem + 0.04) or (b.startswith(("shin", "foot")) and co.z > boot_top - 0.1),
-        lambda co, b: 0.03 + (0.012 if co.z < boot_top + 0.05 else 0.0), M["pants"], smooth=14, hem=(boot_top, boot_top - 0.085))
-    # The jacket hangs from the pelvis: what the thighs held goes to the hips, so a crouch doesn't pull its hem
-    # down between the legs.
-    hips = jacket.vertex_groups["hips"]
-    for s in "LR":
-        g = jacket.vertex_groups[f"thigh.{s}"]
-        for v in jacket.data.vertices:
-            w = next((e.weight for e in v.groups if e.group == g.index), 0.0)
-            if w:
-                hips.add([v.index], w, "ADD")
-                g.remove([v.index])
+    jacket, pants = rider_clothes(body, rig, M)
+    human.repose(rig, [body, jacket, pants])
+    B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
+    over = B["hips"][0].z  # below this the jacket lies over the trousers' waist
+    human.refine(pants, body, 20, 0.012, SOFTEN)
+    human.refine(jacket, body, 80, lambda co: 0.013 + 0.021 * min(1, max(0, (over + 0.03 - co.z) / 0.06)), SOFTEN, rim=0.008,
+                 relax=(shoulders(B, 0.14), 100), over=[pants])
+    human.add_rim(pants, 0.008)
+    head = head_egg(J)
+    boot_top = 0.29
     parts = [jacket, pants]
     for side in "LR":
         parts.append(human.hull_shell(body, f"boot{side}", lambda i, co, b, side=side: b == f"foot.{side}" or (b == f"shin.{side}" and co.z < boot_top),
                                       0.014, M["boots"], keep=lambda n, c: n.z > -0.7, rim=0.006))
-    human.bind(parts, rig)
+    human.bind(parts[2:], rig)
     skin, brows = face(head, J, M["skin"], M["brows"])
     hair = weight_to(head.mesh("hair", M["hair"], grow=0.01, cuts=[hairline(head)], rim=0.006), "head")
     gear = [*mittens(B, M["mittens"]), *helmet(head, M), hair]
@@ -395,6 +408,44 @@ def build_rider():
     for o in parts:
         decimate(o, RIDER_TRIS.get(o.name))
     return rig, parts
+
+
+def rider_clothes(body, rig, M):
+    """The jacket and trousers, grown in MakeHuman's A pose (arms clear of the sides, so sleeve and body never
+    press together) and bound to the rig, ready to be posed with the body."""
+    B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
+    hem = B["hips"][0].z - 0.06
+    boot_top = 0.29
+    neck = B["neck"][0].z
+    ARM = ("upperarm", "forearm")
+    torso = lambda co: abs(co.x) < 0.3  # the hem, not the cuffs (the hands hang near hem height in this pose)
+
+    def level_hem(bm):
+        # A straight hem round the hips, not one that follows the legs down between them.
+        for v in bm.verts:
+            if abs(v.co.x) < 0.2:
+                v.co.z = max(v.co.z, hem - 0.02)
+
+    jacket = human.shell(
+        body, "jacket",
+        lambda i, co, b: b.startswith(ARM) or ((b in ("chest", "spine", "hips") or b.startswith("thigh")) and co.z > hem) or (b == "neck" and co.z < neck + 0.045),
+        lambda co, b: 0.017 if b.startswith(ARM) else 0.01 if co.z > neck else 0.024, M["jacket"], smooth=60, clear=0.6, soften=SOFTEN,
+        hem=(hem + 0.1, hem - 0.01, torso), drape=level_hem, rim=0)
+    pants = human.shell(
+        body, "pants",
+        lambda i, co, b: ((b == "hips" or b.startswith("thigh")) and co.z < hem + 0.04) or (b.startswith(("shin", "foot")) and co.z > boot_top - 0.1),
+        lambda co, b: 0.02 + (0.008 if co.z < boot_top + 0.05 else 0.0), M["pants"], smooth=40, clear=0.6, soften=SOFTEN,
+        hem=(boot_top, boot_top - 0.085), rim=0)
+    # The jacket hangs from the pelvis: what the thighs held goes to the hips, so a crouch doesn't pull its hem
+    # down between the legs. The trousers' waist, under the jacket, goes the same way, so bending the legs
+    # can't swing it out through the hem.
+    to_hips(jacket, lambda co: 1.0)
+    to_hips(pants, lambda co: min(1.0, max(0.0, (co.z - (hem - 0.06)) / 0.06)))
+    human.bind([jacket, pants], rig)
+    return jacket, pants
+
+
+SOFTEN = 250  # smoothing passes over the body the clothes are grown from
 
 
 def helmet(head, M):
@@ -426,7 +477,7 @@ VILLAGER_BUILDS = {
 POSES = ("stand", "sit", "cheer", "sitcheer")
 HEIGHT = 1.74
 SIT_DROP = 0.45  # seated bodies sit this much lower (crowd.ts drops their hair, hats and extras to match)
-VILLAGER_TRIS = {"shirt": 1500, "pants": 1000, "shoes": 360, "skin": 900, "brows": 60, "hands": 320}
+VILLAGER_TRIS = {"shirt": 2000, "pants": 1300, "shoes": 360, "skin": 900, "brows": 60, "hands": 320}
 
 
 def villager_aims(pose):
@@ -456,9 +507,9 @@ def villager_joints(build):
 
 
 def villager_body(build, pose, head):
-    """One villager body in one pose, dressed for winter: a jumper or jacket, trousers, boots, mittens, the
-    egg head (`head`, shared by every body so the hair and hats fit) and the neck. Returns the parts and the
-    bones' rest positions."""
+    """One villager body in one pose, dressed for winter: a jumper, trousers, boots, mittens, the egg head
+    (`head`, shared by every body so the hair and hats fit) and the neck. Returns the parts and the bones'
+    rest positions."""
     body, J = human.build_body(f"{build}_{pose}", VILLAGER_BUILDS[build])
     k = HEIGHT / J["crown"].z
     for v in body.data.vertices:
@@ -467,43 +518,23 @@ def villager_body(build, pose, head):
     rig = human.build_rig(J)
     human.bind([body], rig)
     human.simplify(body)  # in MakeHuman's A pose, before the arms come down: hands melted onto the hips would tear
-    human.repose(rig, [body])
     M = {n: bpy.data.materials.get(n) for n in ("shirt", "pants", "skin", "shoes", "brows", "hands")}
+    sitting = pose.startswith("sit")
+    shirt, pants = villager_clothes(body, rig, M, sitting)
+    human.repose(rig, [body, shirt, pants])
     B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
     # The hands and head are built standing, then posed with the body.
     skin, brows = face(head, J, M["skin"], M["brows"], 0.054 if build == "m" else 0.047)
     hands = mittens(B, M["hands"])
     human.bind([*skin, brows, *hands], rig)
-    human.repose(rig, [body, *skin, brows, *hands], poses=villager_aims(pose))
+    human.repose(rig, [body, shirt, pants, *skin, brows, *hands], poses=villager_aims(pose))
     B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
-    bones = human.dominant_bones(body)
-    ARM = ("upperarm", "forearm")
-    waist = B["hips"][0].z + 0.07  # the belt line, a little above the hip joints
-    neck = B["neck"][0].z
-    sitting = pose.startswith("sit")
-
-    def wrist(co):
-        return min((co - B[f"hand.{s}"][0]).length for s in "LR")
-
-    def level_hem(bm):
-        if sitting:
-            return
-        for v in bm.verts:
-            if abs(v.co.x) < 0.2:
-                v.co.z = max(v.co.z, waist - 0.14)
-
-    # The jumper reaches the top of the thighs all round, over the trousers' waist, with sleeves to the wrist.
-    upper = lambda b, co: b in ("chest", "spine") or (b == "hips" and co.z > waist - 0.12) or (b.startswith("thigh") and co.z > waist - 0.12 and not sitting) or (b == "neck" and co.z < neck + 0.03) or b.startswith(ARM)
-    shirt = human.shell(body, "shirt", lambda i, co, b: upper(b, co), lambda co, b: 0.022 if b.startswith(ARM) else 0.01 if co.z > neck else 0.028, M["shirt"], smooth=45, clear=0.6, hem=None if sitting else (waist - 0.02, waist - 0.135),
-                        drape=None if pose != "stand" else (lambda bm: (level_hem(bm), human.drape_slices(waist - 0.12, neck - 0.03, skip=lambda i: bones[i].startswith(ARM))(bm))))
-    # Trousers tucked into the boots: they stop inside the boot, whose top closes over them.
-    boot_top = lambda s: B[f"foot.{s}"][0].z + 0.07
-    pants = human.shell(body, "pants", lambda i, co, b: (b in ("hips", "spine") or b.startswith("thigh")) and co.z < waist + 0.02 or (b.startswith("shin") and co.z > boot_top(b[-1]) - 0.035),
-                        lambda co, b: 0.016, M["pants"], smooth=14, clear=0.6)
-    # Open at the top along a level rim, wider than the trousers going into them.
-    shoes = [human.hull_shell(body, f"shoe{s}", lambda i, co, b, s=s: b == f"foot.{s}" or (b == f"shin.{s}" and co.z < boot_top(s) + 0.03), 0.024, M["shoes"],
-                              keep=lambda n, c: n.z > -0.8, rim=0.005, cuts=[(Vector((0, 0, boot_top(s))), Vector((0, 0, -1)))]) for s in "LR"]
-    shoe = join(shoes, "shoes")
+    over = B["hips"][0].z + 0.04  # below this the jumper lies over the trousers' waist
+    human.refine(pants, body, 20, 0.007, SOFTEN)
+    human.refine(shirt, body, 80, lambda co: 0.009 + 0.008 * min(1, max(0, (over + 0.03 - co.z) / 0.06)), SOFTEN, rim=0.008,
+                 relax=(shoulders(B), 60), over=[pants])
+    human.add_rim(pants, 0.008)
+    shoe = join(boots(B, M["shoes"], 0.05 if build == "m" else 0.046), "shoes")
     bpy.data.objects.remove(body)  # dressed, none of it shows
     skin = join(skin, "skin")
     hand = join(hands, "hands")
@@ -522,6 +553,34 @@ def villager_body(build, pose, head):
                 v.co.z -= SIT_DROP
     bpy.data.objects.remove(rig)
     return parts, B
+
+
+def villager_clothes(body, rig, M, sitting):
+    """The jumper and trousers, grown in MakeHuman's A pose from a softened copy of the body and bound to the
+    rig, ready to be posed with it. Close-fitting, with straight hems and cuffs."""
+    B = {b.name: (b.head_local.copy(), b.tail_local.copy()) for b in rig.data.bones}
+    ARM = ("upperarm", "forearm")
+    waist = B["hips"][0].z + 0.07  # the belt line, a little above the hip joints
+    neck = B["neck"][0].z
+    torso = lambda co: abs(co.x) < 0.3  # the hem, not the cuffs (the hands hang near hem height in this pose)
+
+    def level_hem(bm):
+        for v in bm.verts:
+            if abs(v.co.x) < 0.2:
+                v.co.z = max(v.co.z, waist - 0.14)
+
+    # The jumper reaches the top of the thighs all round, over the trousers' waist, with sleeves to the wrist.
+    upper = lambda b, co: b in ("chest", "spine") or (b == "hips" and co.z > waist - 0.12) or (b.startswith("thigh") and co.z > waist - 0.12) or (b == "neck" and co.z < neck + 0.03) or b.startswith(ARM)
+    shirt = human.shell(body, "shirt", lambda i, co, b: upper(b, co), lambda co, b: 0.013 if b.startswith(ARM) else 0.008 if co.z > neck else 0.016,
+                        M["shirt"], smooth=60, clear=0.6, soften=SOFTEN, hem=(waist - 0.02, waist - 0.135, torso), drape=level_hem, rim=0)
+    # The trousers' waist stays well under the jumper.
+    pants = human.shell(body, "pants", lambda i, co, b: (b in ("hips", "spine") or b.startswith("thigh")) and co.z < waist - 0.08 or (b.startswith("shin") and co.z > B[f"foot.{b[-1]}"][0].z + 0.035),
+                        lambda co, b: 0.012, M["pants"], smooth=40, clear=0.6, soften=SOFTEN, rim=0)
+    if not sitting:
+        # Standing, the jumper hangs from the pelvis, so its hem stays level as the legs move.
+        to_hips(shirt, lambda co: 1.0)
+    human.bind([shirt, pants], rig)
+    return shirt, pants
 
 
 def hairline(head):

@@ -239,6 +239,7 @@ def repose(rig, objs, arm_out=0.15, poses=None):
 
 def bake_pose(rig, objs):
     """Applies the current pose to the meshes and makes it the rig's rest pose."""
+    _IRONED.clear()  # the body has moved
     for o in objs:
         bpy.context.view_layer.objects.active = o
         for x in bpy.context.view_layer.objects:
@@ -363,10 +364,29 @@ def _ironed(body, iterations=80):
     return _IRONED[key]
 
 
-def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, keep_groups=True, clear=0.75, iron=True, drape=None, relax=None, hem=None):
+def _softened(body, iterations):
+    """The body's positions and normals after `iterations` of shrink-free smoothing, and a BVH of that soft
+    body: clothes grown from it skim over the muscles, the chest and the knees instead of following them."""
+    import bmesh
+    from mathutils.bvhtree import BVHTree
+
+    key = (body.name, len(body.data.vertices), iterations)
+    if key not in _IRONED:
+        bm = bmesh.new()
+        bm.from_mesh(body.data)
+        _taubin(bm, iterations, lam=0.6, mu=-0.63)
+        bm.normal_update()
+        bm.verts.ensure_lookup_table()
+        _IRONED[key] = ([v.co.copy() for v in bm.verts], [v.normal.copy() for v in bm.verts], BVHTree.FromBMesh(bm))
+        bm.free()
+    return _IRONED[key]
+
+
+def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, keep_groups=True, clear=0.75, iron=True, drape=None, relax=None, hem=None, soften=0):
     """A garment from the body: `pick(i, co, bone)` chooses vertices, `thickness(co, bone)` how far it stands off.
     `folds(co, bone)` can add a little more along the normal, for creases. `hem=(below, z)` lays every edge
-    vertex lower than `below` at height `z`, for a straight hem. Returns the new object."""
+    vertex lower than `below` at height `z`, for a straight hem (a third item, `where(co)`, limits which).
+    `soften` grows it from a smoothed copy of the body instead of the skin. Returns the new object."""
     import bmesh
     from mathutils.bvhtree import BVHTree
 
@@ -392,7 +412,7 @@ def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, kee
         v[src] = i
     # Offset from an ironed copy of the body, not the skin itself: a small sharp form (a knuckle, a nipple)
     # pushed out by a few centimetres along its own normals would fold over itself.
-    cos, nors, bvh = _ironed(body)
+    cos, nors, bvh = _softened(body, soften) if soften else _ironed(body)
     if not iron:
         cos, nors = [v.co for v in me.vertices], [v.normal for v in me.vertices]
     for v in bm.verts:
@@ -422,9 +442,9 @@ def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, kee
     if rims:
         _taubin(bm, 30, movable=lambda v: v.is_boundary, edges=rims)
     if hem:
-        below, z = hem
+        below, z, where = (*hem, None)[:3]
         for v in bm.verts:
-            if v.is_boundary and v.co.z < below:
+            if v.is_boundary and v.co.z < below and (where is None or where(v.co)):
                 v.co.z = z
     # Smoothing shrinks the shell: keep it clear of the ironed body.
     for v in bm.verts:
@@ -455,6 +475,66 @@ def shell(body, name, pick, thickness, mat, smooth=6, rim=0.008, folds=None, kee
     if not keep_groups:
         obj.vertex_groups.clear()
     return obj
+
+
+def refine(obj, body, iterations, clearance, soften, rim=0.0, relax=None, over=()):
+    """Smooths a garment again once it has been posed (bringing the arms down leaves a ridge over the
+    shoulder), keeps it `clearance` (a distance, or a function of position) off the softened posed body and
+    outside the garments in `over` (still without their rims), then gives it its rim. Its openings stay put.
+    `relax=(zone(co), n)` irons a zone flat with `n` passes of plain smoothing, which takes the corner off a
+    shoulder."""
+    import bmesh
+    from mathutils.bvhtree import BVHTree
+
+    _, _, bvh = _softened(body, soften)
+    gap = clearance if callable(clearance) else (lambda co: clearance)
+    under = []
+    for o in over:
+        ob = bmesh.new()
+        ob.from_mesh(o.data)
+        ob.faces.ensure_lookup_table()
+        rimmed = {f.index for f in ob.faces if any(v.is_boundary for v in f.verts)}  # its waistband
+        under.append((BVHTree.FromBMesh(ob), rimmed))
+        ob.free()
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    _taubin(bm, iterations, movable=lambda v: not v.is_boundary)
+    if relax:
+        zone, n = relax
+        verts = [v for v in bm.verts if not v.is_boundary and zone(v.co)]
+        for _ in range(n):
+            bmesh.ops.smooth_vert(bm, verts=verts, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    for v in bm.verts:
+        hit = bvh.find_nearest(v.co)
+        if hit[0] is not None:
+            d, want = (v.co - hit[0]).dot(hit[1]), gap(v.co)
+            if d < want:
+                v.co += hit[1] * (want - d)
+        for t, rimmed in under:
+            # The garment underneath gets its thickness inward, so a few millimetres clear of it is enough;
+            # but not beside its opening (a waistband), where the nearest point lies off to one side.
+            hit = t.find_nearest(v.co, 0.05)
+            if hit[0] is not None and hit[2] not in rimmed:
+                d = (v.co - hit[0]).dot(hit[1])
+                if d < 0.005:
+                    v.co += hit[1] * (0.005 - d)
+    bm.to_mesh(obj.data)
+    bm.free()
+    if rim:
+        add_rim(obj, rim)
+
+
+def add_rim(obj, thickness):
+    """Gives a garment's single surface its thickness, inward, with a closed edge at every opening."""
+    s = obj.modifiers.new("rim", "SOLIDIFY")
+    s.thickness = thickness
+    s.offset = -1
+    s.use_rim = True
+    bpy.context.view_layer.objects.active = obj
+    for x in bpy.context.view_layer.objects:
+        x.select_set(x == obj)
+    bpy.ops.object.modifier_move_to_index(modifier="rim", index=0)  # before the rig
+    bpy.ops.object.modifier_apply(modifier="rim")
 
 
 def trim_body(body, keep):
